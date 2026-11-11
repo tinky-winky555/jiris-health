@@ -1,8 +1,7 @@
 """Consumer of visits.* events from queue billing.inbox (TDD section 8.2; contract DL-25).
 
-Every message is settled here, never by FastStream (`AckPolicy.MANUAL`): its default,
-reject on error, would park a VisitCompleted on any exception and leave the visit pending
-(D6). One message at a time, one transaction per message, ack only after COMMIT:
+Built on the shared mechanics of app/outbox/consumer.py (DL-33): manual acknowledgement, raw
+body, one log line per message. One transaction per message, ack only after COMMIT:
 
 - not a valid VisitCompleted envelope (R9): reject without requeue, to billing.parking;
 - processed, or a duplicate: ack;
@@ -13,28 +12,24 @@ The queue object comes from app/outbox/topology.py; this module declares and bin
 
 import asyncio
 import logging
-from typing import Any
 
-from faststream import AckPolicy
-from faststream.message import StreamMessage
 from faststream.rabbit import RabbitBroker
 from faststream.rabbit.annotations import RabbitMessage
-from faststream.rabbit.schemas import Channel
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.billing.service import process_visit_completed
 from app.contracts import VISIT_COMPLETED, Envelope, VisitCompleted
+from app.outbox import consumer as mechanics
+from app.outbox.consumer import MalformedMessage
 from app.outbox.topology import BILLING_INBOX, INBOX_QUEUES
 
 logger = logging.getLogger(__name__)
 
+MODULE = "billing"
 REQUEUE_DELAY_S = 1.0  # D28: short delay before a requeue
-PREFETCH = 10
 
-
-class MalformedMessage(Exception):
-    """The body is not a VisitCompleted envelope of schema version 1 (R9)."""
+__all__ = ["MalformedMessage", "handle", "parse_visit_completed", "register"]
 
 
 def parse_visit_completed(body: bytes) -> Envelope[VisitCompleted]:
@@ -56,17 +51,16 @@ def _log(
     envelope: Envelope[VisitCompleted] | None = None,
     error: BaseException | None = None,
 ) -> None:
-    logger.log(
+    mechanics.log_consumed(
+        logger,
         level,
-        "event consumed module=billing event_id=%s event_type=%s visit_id=%s message_id=%s"
-        " redelivered=%s outcome=%s%s",
-        envelope.event_id if envelope else "-",
-        envelope.event_type if envelope else "-",
-        envelope.payload.visit_id if envelope else "-",
-        message.message_id or "-",
-        message.raw_message.redelivered,
+        MODULE,
+        message,
         outcome,
-        f" error={error!r}" if error else "",
+        event_id=envelope.event_id if envelope else "-",
+        event_type=envelope.event_type if envelope else "-",
+        visit_id=envelope.payload.visit_id if envelope else "-",
+        error=error,
     )
 
 
@@ -89,21 +83,10 @@ async def handle(message: RabbitMessage, sessions: async_sessionmaker[AsyncSessi
     _log(logging.INFO, message, "duplicate" if outcome.duplicate else "processed", envelope)
 
 
-async def _raw_body(message: StreamMessage[Any]) -> bytes:
-    """Hand the body over undecoded. FastStream's JSON decoder would fail on a malformed
-    body before the handler runs, and under AckPolicy.MANUAL that message would stay
-    unsettled for ever; parsing belongs to `parse_visit_completed` (DL-25)."""
-    return message.body
-
-
 def register(broker: RabbitBroker, sessions: async_sessionmaker[AsyncSession]) -> None:
     """Subscribe the Billing handler to billing.inbox on `broker` (module-05 section 3)."""
 
-    @broker.subscriber(
-        INBOX_QUEUES[BILLING_INBOX],
-        ack_policy=AckPolicy.MANUAL,
-        channel=Channel(prefetch_count=PREFETCH),
-        decoder=_raw_body,
-    )
     async def on_billing_inbox(message: RabbitMessage) -> None:
         await handle(message, sessions)
+
+    mechanics.subscribe(broker, INBOX_QUEUES[BILLING_INBOX], on_billing_inbox)
