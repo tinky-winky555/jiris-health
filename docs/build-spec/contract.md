@@ -68,9 +68,9 @@ section 6.
 | Error shape | 409 body `{"reason": "completion_pending" \| "invalid_status"}`; 404 body `{"detail": "Not Found"}` (DL-10); 422 FastAPI validation body |
 | Response codes | Create 201 with the visit; `/start`, `/cancel`, `/missed` 200 with the visit; `/complete` 202 with the visit; list endpoints return a JSON array; no pagination |
 | Transactions | One transaction per HTTP command and per consumed message; state change and outbox row in the same transaction |
-| Idempotency | Inbox insert `ON CONFLICT (event_id) DO NOTHING` first; processed → ack without effect; `message_id` = `event_id` |
+| Idempotency | Inbox insert `ON CONFLICT (event_id) DO NOTHING` first, then the row `FOR UPDATE`; processed (`billing.inbox.status`, `visits.inbox.processed_at`) → ack without effect; `message_id` = `event_id` |
 | Concurrency | Conditional UPDATE for `/complete`; `SELECT ... FOR UPDATE` on the visit in the Visits consumer; `SKIP LOCKED` in relays |
-| Retries | Relay: unlimited, exponential backoff to 30 s. Billing: 5 attempts for transient or unclassified errors, counted in `billing.inbox`; permanent errors none |
+| Retries | Relay: unlimited, exponential backoff to 30 s. Billing: 5 attempts for transient or unclassified errors, counted in `billing.inbox`; permanent errors none. Visits consumer (DL-31): database unavailable, unlimited with backoff to 30 s; other errors 5 attempts counted in `visits.inbox`, then parking |
 | Dead letters | Malformed messages and exhausted retries go to the module's parking queue through `jiris.dlx`; never requeued automatically |
 | Reconnection | aio-pika robust connections under FastStream (R7) |
 | Money | Decimal, numeric(12,2), ROUND_HALF_UP; decimal string in events |
@@ -121,14 +121,14 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | `xfail(strict=True, raises=WorkerNotReady)`, reason "needs relay and consumers; removed in M06" (DL-6, DL-17). 50 of 50 runs reported xfailed, at setup, with `WorkerNotReady`: the worker is not built. |
-| Test count | 274 collected on `feature/m05-billing-consumer` (224 passed, 50 xfailed), M05 completion. Baseline before M05: 217. |
+| Test count | 276 collected on `build/increments` at `755a547` (226 passed, 50 xfailed). This is the baseline for M06. |
 | M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
 | Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
 | M04, outbox relay and topology | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition to close TD-5 first (done, DL-23, `0bf2246`); merged into `build/increments` as `fa5dec6` (`Merge M04 outbox-relay: IG-7 approved`) and pushed. Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
-| M05, Billing consumer, happy path | Complete on `feature/m05-billing-consumer` (from `build/increments` at `fa5dec6`; not merged, not pushed). Completion report `gate-report-M05-IG-7.md`: 8 of 8 criteria met. |
-| Current module | None open. M06 (Visits consumer; T1 green) is authored after the developer approves the M05 IG-7 report; its plan carries DL-28. |
-| Last approved gate | HG-1 on module-05 and `gate-report-M05-IG-3.md`, 2026-11-11. |
-| Next pending gate | Developer review of `gate-report-M05-IG-7.md`, then the BS-3 merge. |
+| M05, Billing consumer, happy path | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition of a generic plan regression test (done, `ab215ad`); merged into `build/increments` as `755a547` (`Merge M05 billing-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M05-IG-7.md`: 8 of 8 criteria met. |
+| Current module | M06, Visits consumer; T1 green, in progress on `feature/m06-visits-consumer` (from `build/increments` at `755a547`). HG-1 given with the decisions DL-29 to DL-33. |
+| Last approved gate | HG-1 on module-06 and `gate-report-M06-IG-3.md`, 2026-11-11. |
+| Next pending gate | Developer review of `gate-report-M06-IG-7.md`, then the BS-3 merge. |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -167,6 +167,11 @@ repository.
 | DL-26 | 2026-11-11 | M05 adds only BillingRecordCreated to `app.contracts`; BillingFailed comes with M06 or M07 (OQ-16) | approved by the developer |
 | DL-27 | 2026-11-11 | Clean test state: the M04 tests that publish or read messages purge `billing.inbox`, `visits.inbox` and both parking queues of the session broker after each test; every fixture that starts a worker purges `billing.inbox` and `visits.inbox` first | approved by the developer |
 | DL-28 | 2026-11-11 | Carried into the M06 plan: tests that read queues directly run isolated from the long-lived worker, on a dedicated vhost or broker or with the worker stopped for the test | approved by the developer |
+| DL-29 | 2026-11-11 | BillingFailed is added to `app.contracts` and handled by the Visits consumer in M06 (TDD §6.4 step 4), tested with crafted replies. This part of the failure path moves from M07 to M06; M07 keeps Billing's emission of BillingFailed, the error classes, the counter and T4, T5 (OQ-17). Reverses DL-26 for BillingFailed | approved by the developer |
+| DL-30 | 2026-11-11 | A reply whose `visit_id` matches no visit is parked in `visits.parking` with an ERROR line (OQ-18) | approved by the developer |
+| DL-31 | 2026-11-11 | TDD §5.1 and §6.4 amended: the Visits consumer classifies failures as the relay does. Database unavailable or connection lost: requeue with exponential backoff to 30 s, unlimited (D6). Malformed message: `visits.parking` at once. Any other exception: `attempts + 1` and `last_error` in `visits.inbox` in a short transaction after ROLLBACK; at 5 attempts, `visits.parking` and an ERROR line. Migration `visits_0002` adds `attempts` (int, default 0) and `last_error` (text, null) to `visits.inbox`, and makes `processed_at` nullable without a default: with a counter in the row, a row can exist before the reply is processed, so `processed_at IS NOT NULL` is the processed marker (OQ-19) | approved by the developer (HG-2); the `processed_at` change is the agent's consequence of the rule, reported at IG-7 |
+| DL-32 | 2026-11-11 | DL-28 is implemented by time, not by vhost: the `worker` fixture is module scoped; T3 and the worker test start their own worker; sensitive modules start with a guard that fails when an inbox queue has a foreign consumer (OQ-20) | approved by the developer |
+| DL-33 | 2026-11-11 | The consumer mechanics shared by Billing and Visits (manual acknowledgement, raw decoder, prefetch, settling, log line) live in `app/outbox/consumer.py`; `app/billing/consumer.py` uses them with no change of behaviour; the M05 tests pass unchanged, except the M05 assertion that BillingFailed is not registered, which DL-29 reverses (OQ-21) | approved by the developer |
 
 ## 7. Open questions and technical debt
 
@@ -196,6 +201,11 @@ Resolved questions, kept for traceability:
 | OQ-14 | M05: `GET /api/billing-records` in the API process with a `billing_app` pool | Yes | DL-24 |
 | OQ-15 | M05: interim failure behaviour until M07 | (a) extended: a malformed envelope and a payload that fails its event type's validation go to `billing.parking` at once (R9); (b) yes, until M07 | DL-25 |
 | OQ-16 | M05: only BillingRecordCreated in `app.contracts` | Yes | DL-26 |
+| OQ-17 | M06: BillingFailed and its Visits handling now | Yes; the Visits side moves from M07 to M06 | DL-29 |
+| OQ-18 | M06: reply for an unknown visit | Park in `visits.parking` with ERROR | DL-30 |
+| OQ-19 | M06, HG-2: Visits consumer failure policy | Not unlimited requeue: classes as in the relay (database unavailable: backoff, unlimited; malformed: parking; other: counted in `visits.inbox`, parking at 5) | DL-31 |
+| OQ-20 | M06: DL-28 by time, not by vhost | Yes | DL-32 |
+| OQ-21 | M06: shared consumer mechanics in `app/outbox/consumer.py` | Yes; M05 tests pass unchanged | DL-33 |
 
 ### 7b. Technical debt summary
 

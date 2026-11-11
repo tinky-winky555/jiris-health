@@ -90,6 +90,8 @@ app/
     migrations/         # Alembic chain for schema "billing"
   outbox/
     relay.py            # generic polling relay, parametrised by schema and role
+    topology.py         # exchanges, queues, bindings (contract DL-21)
+    consumer.py         # consumer mechanics shared by both modules (contract DL-33)
   main_api.py           # API entry point
   main_worker.py        # worker entry point: 2 relays + 2 consumers + outbox purge
 tests/
@@ -120,7 +122,10 @@ import-linter contracts: `app.visits` and `app.billing` are independent; `app.co
 | | `published_at` | timestamptz null | partial index `WHERE published_at IS NULL` |
 | | `attempts` | int | publish attempts, diagnostic only |
 | `inbox` | `event_id` | uuid PK | de-duplication of Billing replies |
-| | `event_type`, `processed_at` | | |
+| | `event_type` | text | |
+| | `processed_at` | timestamptz null | set when the reply is applied or ignored; NULL while it is failing (contract DL-31, migration `visits_0002`) |
+| | `attempts` | int, default 0 | failed processing attempts of other causes; survives restarts (DL-31) |
+| | `last_error` | text null | last failure (DL-31) |
 
 ### 5.2 Schema `billing` (role `billing_app`)
 
@@ -212,11 +217,20 @@ The conditional UPDATE is the single point that serialises concurrent requests (
 
 ### 6.4 Reply handling in Visits (consumer, one transaction)
 
-1. INSERT into `visits.inbox` (`ON CONFLICT DO NOTHING`); no row inserted → already processed → ack.
-2. Load the visit `FOR UPDATE`; if `completion_attempt_id <> payload.completion_attempt_id` → ignore (R1), commit, ack.
+1. INSERT into `visits.inbox` (`ON CONFLICT DO NOTHING`), then `SELECT processed_at ... FOR UPDATE`; `processed_at` set → already processed → ack.
+2. Load the visit `FOR UPDATE`; absent → park (below); if `completion_attempt_id <> payload.completion_attempt_id` → ignore (R1): `processed_at = now()`, commit, ack.
 3. BillingRecordCreated: already Completed → no-op (R3); else `status = 'Completed'`.
 4. BillingFailed: `completion_requested_at = NULL`, `completion_failure_reason = payload.reason` (D16).
-5. COMMIT, then ack.
+5. `processed_at = now()`; COMMIT, then ack.
+
+Failure classes of the Visits consumer (approved by Sasha on 2026-11-11, contract DL-30, DL-31), as in the relay:
+
+- not a valid BillingRecordCreated or BillingFailed envelope of schema version 1, or a payload that fails its validation: reject without requeue to `visits.parking` at once (R9);
+- a reply whose `visit_id` matches no visit: ROLLBACK, an ERROR line, reject without requeue to `visits.parking`;
+- database unavailable or connection lost: ROLLBACK, `nack` with requeue after an exponential backoff (0.5 s doubling to 30 s), without a limit; `attempts` unchanged (D6);
+- any other exception: ROLLBACK; in a short transaction `INSERT ... ON CONFLICT (event_id) DO UPDATE SET attempts = attempts + 1, last_error = ...`; below 5 attempts `nack` with requeue after 1 s; at 5, reject without requeue to `visits.parking` with an ERROR line.
+
+Because the failure counter lives in the inbox row, a row may exist before the reply is processed; `processed_at` is therefore the processed marker, NULL until the reply is applied or ignored. The Visits consumer and the Billing consumer share the subscription and settling mechanics in `app/outbox/consumer.py` (contract DL-33).
 
 ## 7. Event contract (D20, D27)
 
