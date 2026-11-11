@@ -1,5 +1,7 @@
 """The API process reads only the Visits database URL (module-03 criterion on billing_app; D13)."""
 
+import logging
+
 import pytest
 
 from app.main_api import create_app
@@ -26,3 +28,15 @@ def test_create_app_needs_no_other_connection_setting(monkeypatch: pytest.Monkey
         "/api/visits/{visit_id}/cancel",
         "/api/visits/{visit_id}/missed",
     }
+
+
+def test_create_app_makes_command_log_lines_visible(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Contract section 3, Logging: INFO lines reach stderr under uvicorn, whose default
+    configuration leaves the root logger at WARNING without a handler."""
+    monkeypatch.setenv("VISITS_DATABASE_URL", "postgresql+asyncpg://visits_app:x@localhost/jiris")
+    create_app()
+    create_app()  # idempotent: a second app adds no second handler
+    app_logger = logging.getLogger("app")
+    assert logging.getLogger("app.visits.api").isEnabledFor(logging.INFO)
+    assert len([h for h in app_logger.handlers if isinstance(h, logging.StreamHandler)]) == 1
+    assert app_logger.propagate is True  # pytest caplog and any root handler still see the lines
