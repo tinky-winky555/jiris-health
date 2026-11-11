@@ -74,7 +74,9 @@ jiris-health/
 ├── docker-compose.yml              # postgres, rabbitmq, migrate, api, worker
 ├── Dockerfile                      # python:3.15.2-slim
 ├── docker/
-│   └── postgres/init.sql           # login roles and database grants (TDD §9.1); schemas and DML grants live in the Alembic chains
+│   └── postgres/
+│       ├── init.sql                # template: login roles and database grants (TDD §9.1, DL-38)
+│       └── init.sh                 # renders init.sql with the passwords from .env
 ├── app/
 │   ├── contracts/                  # envelope and event models; imports no module
 │   ├── visits/
@@ -85,6 +87,7 @@ jiris-health/
 │   │   └── migrations/             # chain "billing"
 │   ├── outbox/
 │   │   ├── relay.py                # generic relay, per schema and role
+│   │   ├── purge.py                # outbox purge after 7 days (R5, M08)
 │   │   ├── topology.py             # exchanges, queues, bindings; declared by the worker (DL-21)
 │   │   └── consumer.py             # consumer mechanics shared by both modules (DL-33)
 │   ├── main_api.py

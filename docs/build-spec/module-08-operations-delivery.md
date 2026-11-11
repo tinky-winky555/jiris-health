@@ -96,21 +96,23 @@ closing evidence; contract §7b; TDD §8.1 (purge), §7, §8.2 updated (IG-6).
 
 ## 4. Acceptance criteria
 
-- [ ] Every test of task 3.1 passes.
-- [ ] R5: published rows older than 7 days are purged in both schemas;
+- [x] Every test of task 3.1 passes.
+- [x] R5: published rows older than 7 days are purged in both schemas;
   unpublished rows never are.
-- [ ] R7: the worker recovers from a broker that is down at start and from
+- [x] R7: the worker recovers from a broker that is down at start and from
   closed connections, with no restart and no manual step.
-- [ ] No literal credential remains in compose, `docker/postgres/` or the
+- [x] No literal credential remains in compose, `docker/postgres/` or the
   tests; `docker compose up` from an empty volume with a filled `.env`
   starts postgres, rabbitmq, migrate (exit 0), api and worker.
-- [ ] The amd64 image builds and imports every compiled dependency.
-- [ ] No exception text reaches an API response.
-- [ ] TD-1, TD-2, TD-3, TD-4, TD-6, TD-7 are Done; contract §7b matches
+- [x] The amd64 image builds and imports every compiled dependency.
+- [x] No exception text reaches an API response.
+- [x] TD-1, TD-2, TD-3, TD-4, TD-6, TD-7 are Done; contract §7b matches
   `docs/technical-debt.md`.
-- [ ] The suite passes in file order and with the T1 module first;
+- [x] The suite passes in file order and with the T1 module first;
   `lint-imports` 3 kept; both `alembic check`; T1 to T8 green.
-- [ ] Collected test count is at least 353 plus the new tests.
+- [x] Collected test count is at least 353 plus the new tests.
+
+Completion report: `gate-report-M08-IG-7.md`.
 
 ## 5. Out of scope
 
