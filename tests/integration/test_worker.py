@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.helpers import Stack, collect_messages, create_visit
+from tests.integration.helpers import Stack, collect_messages, create_visit, wait_until
 
 pytestmark = pytest.mark.integration
 
@@ -42,6 +42,13 @@ async def test_worker_publishes_a_completion_and_stops_on_sigterm(
     relay_worker: tuple[subprocess.Popen, Path], make_client, stack: Stack
 ) -> None:
     process, log_path = relay_worker
+
+    async def topology_declared() -> bool:
+        assert process.poll() is None, log_path.read_text()
+        return "topology declared" in log_path.read_text()
+
+    # Run alone, the queues exist only once the worker has declared them.
+    await wait_until(topology_declared, timeout=30.0, message="worker did not declare the topology")
     client = make_client()
     visit = await create_visit(client)
     response = await client.post(f"/api/visits/{visit['id']}/complete")
