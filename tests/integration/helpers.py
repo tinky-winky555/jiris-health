@@ -272,3 +272,43 @@ async def publish_raw(
             mandatory=True,
         )
     return message_id
+
+
+async def wait_for_consumers(rabbitmq_url: str, queues: tuple[str, ...], timeout: float) -> bool:
+    """True once every queue has at least one consumer (TDD section 11 readiness)."""
+    import aio_pika
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            connection = await aio_pika.connect(rabbitmq_url)
+            async with connection:
+                channel = await connection.channel()
+                counts = []
+                for name in queues:
+                    queue = await channel.declare_queue(name, passive=True)
+                    counts.append(queue.declaration_result.consumer_count)
+                if all(count > 0 for count in counts):
+                    return True
+        except aio_pika.exceptions.ChannelClosed:
+            pass  # queues not declared yet
+        await asyncio.sleep(0.2)
+    return False
+
+
+async def consumer_counts(rabbitmq_url: str, queues: tuple[str, ...]) -> dict[str, int]:
+    """Consumers per queue; a queue that does not exist yet counts as 0."""
+    import aio_pika
+
+    counts: dict[str, int] = {}
+    connection = await aio_pika.connect(rabbitmq_url)
+    async with connection:
+        for name in queues:
+            channel = await connection.channel()
+            try:
+                queue = await channel.declare_queue(name, passive=True)
+            except aio_pika.exceptions.ChannelNotFoundEntity:
+                counts[name] = 0
+                continue
+            counts[name] = queue.declaration_result.consumer_count
+    return counts

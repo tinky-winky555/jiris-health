@@ -28,7 +28,9 @@ from tests.integration.helpers import (
     Stack,
     WorkerNotReady,
     connected_broker,
+    consumer_counts,
     purge_queues,
+    wait_for_consumers,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -105,28 +107,15 @@ def stack(postgres: PostgresContainer, rabbitmq: DockerContainer) -> Stack:
     )
 
 
-async def _wait_for_consumers(rabbitmq_url: str, queues: tuple[str, ...], timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            connection = await aio_pika.connect(rabbitmq_url)
-            async with connection:
-                channel = await connection.channel()
-                counts = []
-                for name in queues:
-                    queue = await channel.declare_queue(name, passive=True)
-                    counts.append(queue.declaration_result.consumer_count)
-                if all(count > 0 for count in counts):
-                    return True
-        except aio_pika.exceptions.ChannelClosed:
-            pass  # queues not declared yet
-        await asyncio.sleep(0.2)
-    return False
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def worker(stack: Stack, tmp_path_factory: pytest.TempPathFactory) -> Iterator[subprocess.Popen]:
-    """Run the worker process; ready once both inbox queues have a consumer."""
+    """Run the worker process; ready once both inbox queues have a consumer.
+
+    Module scoped (DL-32): the worker lives only while the module that needs it runs, so it
+    never relays or consumes during tests that read queues or assert a pending visit.
+    """
     asyncio.run(purge_queues(stack.rabbitmq_url, ("billing.inbox", "visits.inbox")))  # DL-27
     log_path = tmp_path_factory.mktemp("worker") / "worker.log"
     with log_path.open("wb") as log:
@@ -139,7 +128,7 @@ def worker(stack: Stack, tmp_path_factory: pytest.TempPathFactory) -> Iterator[s
         )
         try:
             ready = asyncio.run(
-                _wait_for_consumers(
+                wait_for_consumers(
                     stack.rabbitmq_url, ("billing.inbox", "visits.inbox"), WORKER_READY_TIMEOUT_S
                 )
             )
@@ -272,3 +261,12 @@ async def billing_consumer(events_broker, billing_sessions, stack: Stack) -> Asy
     broker = await start_billing_consumer(stack.rabbitmq_url, billing_sessions)
     yield broker
     await broker.stop()
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def no_foreign_consumers(stack: Stack) -> None:
+    """DL-32: fail loudly when a worker or another consumer is attached to an inbox queue, so a
+    test that reads queues or asserts a pending visit never races a live worker."""
+    counts = await consumer_counts(stack.rabbitmq_url, ("billing.inbox", "visits.inbox"))
+    if any(counts.values()):
+        pytest.fail(f"a consumer is attached before the test started: {counts}")

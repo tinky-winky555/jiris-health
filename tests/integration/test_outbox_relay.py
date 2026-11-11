@@ -22,7 +22,10 @@ from tests.integration.helpers import (
     wait_until,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("clean_queues")]  # DL-27
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.usefixtures("no_foreign_consumers", "clean_queues"),  # DL-32, DL-27
+]
 
 RELAY_LOGGER = "app.outbox.relay"
 
