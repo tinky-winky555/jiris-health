@@ -244,10 +244,12 @@ Money travels as a decimal string (for example `"42.50"`) to avoid float roundin
 | Object | Type | Bindings and settings |
 |---|---|---|
 | `jiris.events` | topic exchange, durable | |
-| `billing.inbox` | queue, durable | bound to `visits.*`; `x-dead-letter-exchange = jiris.dlx` |
-| `visits.inbox` | queue, durable | bound to `billing.*`; `x-dead-letter-exchange = jiris.dlx` |
-| `jiris.dlx` | exchange, durable | |
-| `billing.parking`, `visits.parking` | queues, durable | bound to `jiris.dlx` |
+| `billing.inbox` | queue, durable | bound to `visits.*`; `x-dead-letter-exchange = jiris.dlx`; `x-dead-letter-routing-key = billing.parking` |
+| `visits.inbox` | queue, durable | bound to `billing.*`; `x-dead-letter-exchange = jiris.dlx`; `x-dead-letter-routing-key = visits.parking` |
+| `jiris.dlx` | direct exchange, durable | |
+| `billing.parking`, `visits.parking` | queues, durable | each bound to `jiris.dlx` with its own name as routing key |
+
+Parking routing approved by Sasha on 2026-11-11 (contract DL-18): a dead-lettered message reaches its module's parking queue by an explicit routing key, whatever its original key; the original key stays in the `x-death` header. The topology is declared by the worker at start (`app/outbox/topology.py`, contract DL-21).
 
 Messages: persistent, `message_id = event_id`, `content_type = application/json`.
 
@@ -274,17 +276,27 @@ Per schema, with its own role and pool:
 loop:
   BEGIN
   rows = SELECT * FROM <schema>.outbox
-         WHERE published_at IS NULL
+         WHERE published_at IS NULL AND attempts < 5
          ORDER BY occurred_at
          LIMIT 100
          FOR UPDATE SKIP LOCKED
   for row in rows:
-      publish(row) and await publisher confirm
+      if row.event_type has no routing key in app.contracts:
+          remember row.event_id as unknown; continue
+      publish(row), mandatory, and await publisher confirm (with a timeout)
       UPDATE outbox SET published_at = now() WHERE event_id = row.event_id
   COMMIT
   sleep 500 ms if rows was empty
-on broker error: ROLLBACK, exponential backoff up to 30 s, retry forever
+on broker unavailable, connection lost or publish timeout:
+  ROLLBACK, exponential backoff up to 30 s, retry forever; attempts unchanged
+on message returned as unroutable:
+  the same as above, plus an ERROR log line; the row is not excluded
+after the pass, whether it committed or rolled back, in a short transaction:
+  UPDATE outbox SET attempts = attempts + 1 WHERE event_id IN (unknown rows)
+  an ERROR log line per unknown row; at attempts = 5 the row leaves the selection
 ```
+
+Error classes of the relay approved by Sasha on 2026-11-11 (contract DL-19, DL-20): only an event type the relay cannot route counts towards `attempts`, so a long broker outage never excludes an event (D6); an unknown type cannot block later events beyond five passes. Excluded rows stay in the table, unpublished, for an operator to inspect.
 
 - Several relay instances are safe (`SKIP LOCKED`).
 - Crash after confirm and before COMMIT → the row is published again; receivers de-duplicate.

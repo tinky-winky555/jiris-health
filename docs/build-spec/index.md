@@ -80,7 +80,9 @@ jiris-health/
 │   ├── billing/
 │   │   ├── service.py · models.py · consumer.py
 │   │   └── migrations/             # chain "billing"
-│   ├── outbox/relay.py             # generic relay, per schema and role
+│   ├── outbox/
+│   │   ├── relay.py                # generic relay, per schema and role
+│   │   └── topology.py             # exchanges, queues, bindings; declared by the worker (DL-21)
 │   ├── main_api.py
 │   └── main_worker.py
 ├── tests/

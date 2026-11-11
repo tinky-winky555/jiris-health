@@ -118,14 +118,15 @@ retrospectively.
 |---|---|
 | Contract | **Approved (HG-1) by Sasha on 2026-11-11**, with the adoption corrections of DL-9. Sections 1 to 4 are locked. |
 | Index | Approved (HG-1) by Sasha on 2026-11-11, with the adoption corrections of DL-9. |
-| M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. Awaiting the developer's review of the report. |
-| M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. Awaiting the developer's review of the report. |
+| M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
+| M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | `xfail(strict=True, raises=WorkerNotReady)`, reason "needs relay and consumers; removed in M06" (DL-6, DL-17). 50 of 50 runs reported xfailed, at setup, with `WorkerNotReady`: the worker is not built. |
-| Test count | 181 collected: 131 passed, 50 xfailed, on `feature/m03-visits-api-and-outbox` (M03 completion). Baseline before M03: 73. |
-| M03, Visits API and outbox | Complete on `feature/m03-visits-api-and-outbox` (from `build/increments` at `8c1a741`; not merged, not pushed). Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
-| Current module | None open. M04 (outbox relay and broker topology) is authored after the developer approves the M03 IG-7 report. |
-| Last approved gate | HG-1 on module-03 and `gate-report-M03-IG-3.md`, 2026-11-11. |
-| Next pending gate | Developer review of `gate-report-M03-IG-7.md`, then the BS-3 merge. |
+| Test count | 181 collected on `build/increments` at `65bb3f7` (131 passed, 50 xfailed). 187 collected on `feature/m04-outbox-relay` at `14349e4` (137 passed, 50 xfailed), after the rate precision test. This is the baseline for M04. |
+| M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
+| Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
+| Current module | M04, outbox relay and broker topology, in progress on `feature/m04-outbox-relay` (from `build/increments` at `65bb3f7`). HG-1 given with the decisions DL-18 to DL-22. |
+| Last approved gate | HG-1 on module-04 and `gate-report-M04-IG-3.md`, 2026-11-11; IG-7 of M01 and M02, 2026-11-11. |
+| Next pending gate | Developer review of `gate-report-M04-IG-7.md`, then the BS-3 merge. |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -153,6 +154,11 @@ repository.
 | DL-15 | 2026-11-11 | M03 criterion on the outbox count is evaluated for the visit under test, because integration tests share one database | approved by the developer (OQ-7) |
 | DL-16 | 2026-11-11 | M03 task 3.1 gains a deterministic row-lock test (3.1.7) and a re-completion after reset test (3.1.8) | approved by the developer (OQ-8) |
 | DL-17 | 2026-11-11 | The T1 marker is narrowed to `xfail(strict=True, raises=WorkerNotReady)`: the worker fixture raises `WorkerNotReady` when no consumer appears on both inbox queues, and any other error fails T1. Refines DL-6 | approved by the developer |
+| DL-18 | 2026-11-11 | TDD §7.1 amended: `jiris.dlx` is a direct exchange; `billing.inbox` and `visits.inbox` set `x-dead-letter-routing-key` to `billing.parking` and `visits.parking`; each parking queue is bound by its own name (OQ-9, option A) | approved by the developer (HG-2) |
+| DL-19 | 2026-11-11 | TDD §8.1 amended: an outbox row whose event type has no routing key gets `attempts + 1` in a short transaction after the pass and an ERROR log line; the relay selects only `attempts < 5`, so at most five passes are spent on such a row (OQ-10, OQ-11) | approved by the developer (HG-2) |
+| DL-20 | 2026-11-11 | TDD §8.1 amended: broker unavailable, connection lost or publish timeout means ROLLBACK, exponential backoff to 30 s, retry forever, `attempts` unchanged (D6); a message returned as unroutable (`mandatory=True`, `on_return_raises=True`) is handled the same way plus an ERROR log line, and the row is never excluded (OQ-11, OQ-12) | approved by the developer (HG-2) |
+| DL-21 | 2026-11-11 | Topology declared by the worker through `app/outbox/topology.py`; exchange names and the routing key registry live in `app.contracts`; index section d updated (OQ-13) | approved by the developer |
+| DL-22 | 2026-11-11 | M03 tests check that the visit's outbox row exists, not that it is unpublished, because from M04 a running relay may publish it between the write and the assertion. Refines DL-15 | approved by the developer |
 
 ## 7. Open questions and technical debt
 
@@ -174,6 +180,11 @@ Resolved questions, kept for traceability:
 | OQ-6 | M03: limit `app.contracts` to the envelope and VisitCompleted? | Yes | DL-14 |
 | OQ-7 | M03: outbox count criterion "for the visit under test"? | Yes | DL-15 |
 | OQ-8 | M03: add the row-lock test and the reset test? | Yes | DL-16 |
+| OQ-9 | M04: parking routing through `jiris.dlx` | Option A: direct exchange, `x-dead-letter-routing-key` per inbox queue | DL-18 |
+| OQ-10 | M04: outbox row with an unknown event type | `attempts` + 1 in a short transaction; rows with `attempts >= 5` leave the selection; ERROR log | DL-19 |
+| OQ-11 | M04: when to increment `attempts` | Only for an unknown event type; never for broker unavailability or an unroutable message | DL-19, DL-20 |
+| OQ-12 | M04: `mandatory=True` with `on_return_raises=True` | Yes; an unroutable message is handled as a temporary failure with an ERROR log, the row is not excluded | DL-20 |
+| OQ-13 | M04: `app/outbox/topology.py`; exchange names and routing keys in `app.contracts` | Yes | DL-21 |
 
 ### 7b. Technical debt summary
 
