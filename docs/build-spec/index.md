@@ -78,7 +78,7 @@ jiris-health/
 │   │   ├── api.py · service.py · models.py · consumer.py
 │   │   └── migrations/             # chain "visits"
 │   ├── billing/
-│   │   ├── service.py · models.py · consumer.py
+│   │   ├── api.py · service.py · models.py · consumer.py
 │   │   └── migrations/             # chain "billing"
 │   ├── outbox/
 │   │   ├── relay.py                # generic relay, per schema and role

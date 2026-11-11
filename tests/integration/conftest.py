@@ -23,7 +23,13 @@ from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import ExecWaitStrategy, LogMessageWaitStrategy
 
-from tests.integration.helpers import RestartableRabbit, Stack, WorkerNotReady, connected_broker
+from tests.integration.helpers import (
+    RestartableRabbit,
+    Stack,
+    WorkerNotReady,
+    connected_broker,
+    purge_queues,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 POSTGRES_IMAGE = "postgres:18.1-alpine"
@@ -121,6 +127,7 @@ async def _wait_for_consumers(rabbitmq_url: str, queues: tuple[str, ...], timeou
 @pytest.fixture(scope="session")
 def worker(stack: Stack, tmp_path_factory: pytest.TempPathFactory) -> Iterator[subprocess.Popen]:
     """Run the worker process; ready once both inbox queues have a consumer."""
+    asyncio.run(purge_queues(stack.rabbitmq_url, ("billing.inbox", "visits.inbox")))  # DL-27
     log_path = tmp_path_factory.mktemp("worker") / "worker.log"
     with log_path.open("wb") as log:
         process = subprocess.Popen(
@@ -241,3 +248,27 @@ def isolated_rabbitmq() -> Iterator[RestartableRabbit]:
     )
     with container:
         yield RestartableRabbit(container, f"amqp://guest:guest@{container.get_container_host_ip()}:{port}/")
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def billing_sessions(billing_engine) -> object:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    return async_sessionmaker(billing_engine, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def clean_queues(events_broker, stack: Stack) -> AsyncIterator[None]:
+    """Purge the session queues after a test that publishes or reads messages (DL-27)."""
+    yield
+    await purge_queues(stack.rabbitmq_url)
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def billing_consumer(events_broker, billing_sessions, stack: Stack) -> AsyncIterator[object]:
+    """The Billing subscriber on the session broker for one test."""
+    from tests.integration.helpers import start_billing_consumer
+
+    broker = await start_billing_consumer(stack.rabbitmq_url, billing_sessions)
+    yield broker
+    await broker.stop()

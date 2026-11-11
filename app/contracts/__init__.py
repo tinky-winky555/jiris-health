@@ -3,6 +3,7 @@
 Imports nothing from app.visits or app.billing (import-linter). M03 defines the
 envelope and VisitCompleted; the Billing replies arrive with M05 and M06 (contract DL-14).
 M04 adds the exchange names and the event type to routing key registry (DL-21).
+M05 adds BillingRecordCreated (DL-26).
 """
 
 import uuid
@@ -75,6 +76,15 @@ class VisitCompleted(Payload):
     end_date_time: Timestamp
 
 
+class BillingRecordCreated(Payload):
+    """Billing to Visits: the active record of one completion attempt (FR6, R8)."""
+
+    visit_id: uuid.UUID
+    completion_attempt_id: uuid.UUID
+    billing_record_id: uuid.UUID
+    amount: Money
+
+
 class Envelope[P: Payload](BaseModel):
     """Common envelope of every event (R6)."""
 
@@ -98,9 +108,14 @@ class EventSpec[P: Payload]:
 
 
 VISIT_COMPLETED = EventSpec("VisitCompleted", "visits.visit_completed", VisitCompleted)
+BILLING_RECORD_CREATED = EventSpec(
+    "BillingRecordCreated", "billing.record_created", BillingRecordCreated
+)
 
 # Every event the system can publish, by event type. The outbox relay routes only these.
-EVENTS: dict[str, EventSpec] = {spec.event_type: spec for spec in (VISIT_COMPLETED,)}
+EVENTS: dict[str, EventSpec] = {
+    spec.event_type: spec for spec in (VISIT_COMPLETED, BILLING_RECORD_CREATED)
+}
 
 
 def routing_key_for(event_type: str) -> str | None:
@@ -128,10 +143,12 @@ def new_envelope[P: Payload](
 
 
 __all__ = [
+    "BILLING_RECORD_CREATED",
     "DEAD_LETTER_EXCHANGE",
     "EVENTS",
     "EXCHANGE",
     "VISIT_COMPLETED",
+    "BillingRecordCreated",
     "Envelope",
     "EventSpec",
     "Money",

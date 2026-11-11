@@ -22,7 +22,7 @@ from tests.integration.helpers import (
     wait_until,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("clean_queues")]  # DL-27
 
 RELAY_LOGGER = "app.outbox.relay"
 
@@ -218,7 +218,7 @@ async def test_unroutable_message_keeps_the_row_selectable(
     ("schema", "unknown_type"),
     [
         pytest.param("visits", "NoSuchEvent", id="visits"),
-        pytest.param("billing", "BillingRecordCreated", id="billing"),  # unknown until M05
+        pytest.param("billing", "NoSuchBillingEvent", id="billing"),  # stays unknown
     ],
 )
 async def test_unknown_event_type_is_counted_and_then_excluded(

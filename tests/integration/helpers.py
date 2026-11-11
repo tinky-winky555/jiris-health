@@ -219,3 +219,56 @@ async def connected_broker(rabbitmq_url: str, *, declare: bool = True):
     if declare:
         await declare_topology(broker)
     return broker
+
+
+SESSION_QUEUES = ("billing.inbox", "visits.inbox", "billing.parking", "visits.parking")
+
+
+async def purge_queues(rabbitmq_url: str, queues: tuple[str, ...] = SESSION_QUEUES) -> None:
+    """Drop every message in the given queues; a queue that does not exist yet is skipped
+    (contract DL-27)."""
+    import aio_pika
+
+    connection = await aio_pika.connect(rabbitmq_url)
+    async with connection:
+        for name in queues:
+            channel = await connection.channel()
+            try:
+                queue = await channel.declare_queue(name, passive=True)
+            except aio_pika.exceptions.ChannelNotFoundEntity:
+                continue
+            await queue.purge()
+
+
+async def start_billing_consumer(rabbitmq_url: str, sessions):
+    """The Billing subscriber in the test process, wired as the worker wires it."""
+    from app.billing.consumer import register
+
+    broker = await connected_broker(rabbitmq_url)
+    register(broker, sessions)
+    await broker.start()
+    return broker
+
+
+async def publish_raw(
+    rabbitmq_url: str, body: bytes, *, routing_key: str, message_id: str | None = None
+) -> str:
+    """Publish a message on jiris.events as another service would, with a confirm."""
+    import aio_pika
+
+    message_id = message_id or str(uuid.uuid7())
+    connection = await aio_pika.connect(rabbitmq_url)
+    async with connection:
+        channel = await connection.channel(publisher_confirms=True, on_return_raises=True)
+        exchange = await channel.get_exchange("jiris.events", ensure=True)
+        await exchange.publish(
+            aio_pika.Message(
+                body,
+                message_id=message_id,
+                content_type="application/json",
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+            ),
+            routing_key=routing_key,
+            mandatory=True,
+        )
+    return message_id
