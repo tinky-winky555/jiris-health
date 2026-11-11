@@ -10,13 +10,43 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.billing import api as billing_api
 from app.visits import api as visits_api
 
 LOG_HANDLER_NAME = "jiris-app-stderr"
+
+logger = logging.getLogger("app.api")
+
+# Route function name to the command name of the log line (app.visits.api, contract section 3).
+COMMANDS = {
+    "create_visit": "create",
+    "read_visit": "read",
+    "complete_visit": "complete",
+    "start_visit": "start",
+    "cancel_visit": "cancel",
+    "mark_missed": "missed",
+    "list_billing_records": "list_billing_records",
+}
+
+
+async def _log_rejected(request: Request, error: RequestValidationError) -> JSONResponse:
+    """TD-4: a request refused with 422 writes the command line too; the body stays FastAPI's."""
+    route = request.scope.get("route")
+    name = getattr(route, "name", None)
+    visit_id = request.path_params.get("visit_id", "-")
+    logger.info(
+        "command=%s visit_id=%s event_id=- event_type=- outcome=422 path=%s",
+        COMMANDS.get(name, name or "-"),
+        visit_id,
+        request.url.path,
+    )
+    return await request_validation_exception_handler(request, error)
 
 
 def _required_env(name: str) -> str:
@@ -59,6 +89,7 @@ def create_app() -> FastAPI:
             await billing_engine.dispose()
 
     app = FastAPI(title="Jiris Health", lifespan=lifespan)
+    app.add_exception_handler(RequestValidationError, _log_rejected)
     app.include_router(visits_api.router)
     app.include_router(billing_api.router)
     return app

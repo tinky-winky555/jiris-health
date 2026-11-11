@@ -121,16 +121,17 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | Green: 50 of 50 passed; the `xfail` marker was removed in M06 (`e2a1d54`) after a recorded `XPASS(strict)` 50 of 50. No `xfail` remains in the suite. |
-| Test count | 353 collected on `feature/m07-failure-paths`, 353 passed, M07 completion. Baseline before M07: 325. |
+| Test count | 404 collected on `feature/m08-operations-delivery`, 404 passed, M08 completion. Baseline before M08: 353. |
 | M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
 | Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
 | M04, outbox relay and topology | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition to close TD-5 first (done, DL-23, `0bf2246`); merged into `build/increments` as `fa5dec6` (`Merge M04 outbox-relay: IG-7 approved`) and pushed. Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
 | M05, Billing consumer, happy path | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition of a generic plan regression test (done, `ab215ad`); merged into `build/increments` as `755a547` (`Merge M05 billing-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M05-IG-7.md`: 8 of 8 criteria met. |
 | M06, Visits consumer; T1 green | Complete. IG-7 approved by Sasha on 2026-11-11 with TD-6 recorded (`0087141`); merged into `build/increments` as `0459df5` (`Merge M06 visits-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M06-IG-7.md`: 10 of 10 criteria met; T1, T3, T6 green. |
-| M07, failure paths in Billing | Complete on `feature/m07-failure-paths` (from `build/increments` at `0459df5`; not merged, not pushed). Completion report `gate-report-M07-IG-7.md`: 8 of 8 criteria met; T4, T5 green. T1 to T8 all green. |
-| Current module | None open. M08 (operations and delivery) is authored after the developer approves the M07 IG-7 report. |
-| Last approved gate | HG-1 on module-07 and `gate-report-M07-IG-3.md`, 2026-11-11. |
-| Next pending gate | Developer review of `gate-report-M07-IG-7.md`, then the BS-3 merge. |
+| M07, failure paths in Billing | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `64ef30c` (`Merge M07 failure-paths: IG-7 approved`) and pushed. Completion report `gate-report-M07-IG-7.md`: 8 of 8 criteria met; T4, T5 green. T1 to T8 all green. |
+| M08, technical debt and operations | Complete on `feature/m08-operations-delivery` (from `build/increments` at `64ef30c`; not merged, not pushed). Completion report `gate-report-M08-IG-7.md`: 9 of 9 criteria met; no technical debt open. |
+| Current module | None open. M09 (README, definition of complete, release; 4 hours) is authored after the developer approves the M08 IG-7 report. |
+| Last approved gate | HG-1 on module-08 and `gate-report-M08-IG-3.md`, 2026-11-11. |
+| Next pending gate | BS-3 merge of M08 (IG-7 approved, 53300 decided as DL-42). |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -177,6 +178,12 @@ repository.
 | DL-34 | 2026-11-11 | Approved before M06 IG-7: `visits.inbox.processed_at` nullable, with `processed_at IS NOT NULL` as the processed marker (DL-31); a BillingFailed for a Completed visit is a no-op with a WARNING line naming `visit_id` and `completion_attempt_id`; TDD §6.4 updated and tested | approved by the developer (HG-2) |
 | DL-35 | 2026-11-11 | TDD §8.2 and D15 refined: in Billing, database unavailable or connection lost is retried with a backoff of 0.5 s doubling to 30 s, without a limit and without counting, as in the relay and the Visits consumer (D6); the 5 attempts of D15 cover every other transient or unclassified error (OQ-22) | approved by the developer (HG-2) |
 | DL-36 | 2026-11-11 | TDD §8.2 amended: the permanent class covers payload validation and database errors of SQLSTATE class 22 and class 23, except `23505` `unique_violation`, which stays transient so that a concurrent duplicate delivery is resolved on retry through the inbox and never emits BillingFailed; held by a test with two concurrent deliveries of one VisitCompleted. M05 test 4.1.9 (overflow requeued, interim) replaced by the permanent path (OQ-23) | approved by the developer (HG-2) |
+| DL-37 | 2026-11-11 | The closing scope (about 15 hours) is split: M08, technical debt and operations, 11 hours; M09, README, definition of complete and release, 4 hours. Index sections b, c, d and g updated; total 73 hours (OQ-24) | approved by the developer |
+| DL-38 | 2026-11-11 | TD-1 closed by credentials taken only from `.env`: no default in `docker-compose.yml`, keys only in `.env.example`, `docker/postgres/init.sql` as a psql variable template run by `docker/postgres/init.sh`, random passwords per test session. `.env` stays ignored by `.gitignore` and is refused by `git add` (checked at HG-1 and held by the TD-2 test). A clean clone needs `.env` filled before `docker compose up`; the README (M09) says how (OQ-25) | approved by the developer |
+| DL-39 | 2026-11-11 | TDD §8.2 and §6.4 amended (TD-6): `is_database_unavailable()` covers connection errors, SQLSTATE class 08, 57P01 to 57P03, 40001 and 40P01; any other `OperationalError` is counted. In Billing, 40001 and 40P01 move from counted (DL-36) to not counted. Accepted risk: a deterministic deadlock caused by a bug repeats for ever and is visible only in the logs (WARNING lines with `cause=database_unavailable`) (OQ-26) | approved by the developer (HG-2), risk accepted |
+| DL-40 | 2026-11-11 | TD-2 is part of M08 (OQ-27) | approved by the developer |
+| DL-41 | 2026-11-11 | M08 also delivers a restart policy for `api` and `worker`, FastStream's own log lines at WARNING in the application format, and a `migrate` service that receives only `MIGRATIONS_DATABASE_URL` (OQ-28) | approved by the developer |
+| DL-42 | 2026-11-11 | SQLSTATE 53300 `too_many_connections` is a temporary condition (database unavailable: backoff, not counted), with 08, 57P, 40001 and 40P01; TD-6 and TDD §8.2 list it; held by tests in `test_consumer_mechanics.py` and `test_billing_classify.py`. Recorded as DL-42 because DL-40 was already taken (TD-2) | approved by the developer (HG-2) |
 
 ## 7. Open questions and technical debt
 
@@ -213,6 +220,11 @@ Resolved questions, kept for traceability:
 | OQ-21 | M06: shared consumer mechanics in `app/outbox/consumer.py` | Yes; M05 tests pass unchanged | DL-33 |
 | OQ-22 | M07, HG-2: database unavailable in Billing | Yes: backoff to 30 s, unlimited, not counted (D6); D15's 5 attempts for the other transient and unclassified errors | DL-35 |
 | OQ-23 | M07, HG-2: SQLSTATE classes 22 and 23 permanent | Yes, except 23505 `unique_violation`, which stays transient; M05 test 4.1.9 replaced | DL-36 |
+| OQ-24 | M08: split into M08 and M09 | Yes: M08 11 hours, M09 4 hours; total 73 | DL-37 |
+| OQ-25 | M08, TD-1: credentials only from `.env` | Yes; `.env` stays ignored and cannot be committed | DL-38 |
+| OQ-26 | M08, HG-2, TD-6: 08, 57P*, 40001, 40P01 not counted | Yes, with the accepted risk recorded | DL-39 |
+| OQ-27 | M08: include TD-2 | Yes | DL-40 |
+| OQ-28 | M08: restart policy, FastStream log level, reduced `migrate` environment | Yes | DL-41 |
 
 ### 7b. Technical debt summary
 
@@ -220,10 +232,12 @@ Mirrors open entries in `docs/technical-debt.md`.
 
 | ID | Title | State |
 |---|---|---|
-| TD-1 | Local development credentials written in compose, init.sql and test fixtures | Open |
-| TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Open |
-| TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Open |
-| TD-4 | Rejected creation requests (422) leave no command log line | Open |
+| TD-1 | Local development credentials written in compose, init.sql and test fixtures | Done (M08, DL-38) |
+| TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Done (M08, DL-40) |
+| TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Done (M08) |
+| TD-4 | Rejected creation requests (422) leave no command log line | Done (M08) |
 | TD-5 | The relay imports aio-pika and pamqp, which reach the lock only through `faststream[rabbit]` | Done (DL-23) |
-| TD-6 | Classifier treats every OperationalError as database unavailable | Open (target M08) |
-| TD-7 | BillingFailed reason carries the raw exception text | Open (target M08) |
+| TD-6 | Classifier treats every OperationalError as database unavailable | Done (M08, DL-39) |
+| TD-7 | BillingFailed reason carries the raw exception text | Done (M08) |
+
+No technical debt is open.

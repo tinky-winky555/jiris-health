@@ -277,7 +277,7 @@ async def test_stable_transient_error_is_exhausted_after_five_attempts(
 
 
 async def test_database_outage_requeues_with_backoff_and_never_counts(
-    isolated_rabbitmq, billing_db: asyncpg.Connection, caplog: pytest.LogCaptureFixture
+    isolated_rabbitmq, stack: Stack, billing_db: asyncpg.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     import socket
 
@@ -286,7 +286,10 @@ async def test_database_outage_requeues_with_backoff_and_never_counts(
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         closed_port = sock.getsockname()[1]
-    unreachable = create_async_engine(f"postgresql+asyncpg://billing_app:billing_app@127.0.0.1:{closed_port}/jiris")
+    host_and_port = stack.env["BILLING_DATABASE_URL"].split("@", 1)[1].split("/", 1)[0]
+    unreachable = create_async_engine(
+        stack.env["BILLING_DATABASE_URL"].replace(host_and_port, f"127.0.0.1:{closed_port}")
+    )
     envelope = _visit_completed()
     broker = await start_billing_consumer(
         isolated_rabbitmq.url, async_sessionmaker(unreachable, expire_on_commit=False)

@@ -1,112 +1,34 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Jiris Health (TD-2, DL-40): the files this repository produces and must never commit.
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
+# Environment: .env holds local credentials (contract section 3, DL-38)
 .env*
 !.env.example
 
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-/doc
-
-# python
+# Python and uv
 .venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
-*.egg
 dist/
-build/
-*.whl
 
-# PyCharm / JetBrains
-.idea/
-
-# pytest
+# Test and lint caches
 .pytest_cache/
-htmlcov/
 .coverage
 .coverage.*
-
-# mypy / type checkers
+htmlcov/
 .mypy_cache/
-.dmypy.json
-.pytype/
-
-# ruff / linters
 .ruff_cache/
+.import_linter_cache/
 
-# archived tooling (kept locally, never pushed)
-archive/
-
-# docker
-*.log
-
-# OS
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
 Thumbs.db
+
+# Local tools of the developer (Claude Code settings)
 .claude/
-
-#doc
-
 .mcp.json
 
-sa-key.json
-
-# spec-pipeline
-.spec-pipeline/
-
-# local app logs (rotated by TimedRotatingFileHandler — *.log already covers
-# the live file; this also drops the date-suffixed historical rotations)
-/logs/
-
-# Scripts
-/scripts
-/roadmap
-
-# local database volume artefacts
-/pgdata/
-
-# Certificates for a build behind an intercepting proxy are local, never committed.
-ca/*.crt
-ca/*.pem
-
-# Issued team tokens and the SQL that activates them (M12 task 3.6). The SQL
-# names a client and a jti, and the token file is the credential itself; both
-# are handed over through a secure channel, never through this repository.
-db/scripts/issued/
-*.jwt
-.import_linter_cache/
+# Logs
+*.log

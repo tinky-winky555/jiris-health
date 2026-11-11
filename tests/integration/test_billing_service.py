@@ -239,7 +239,7 @@ async def test_permanent_failure_is_recorded_once_with_billing_failed(
     [failed] = await _failed_replies(billing_db, envelope.payload.visit_id)
     assert failed["error_class"] == "permanent"
     assert failed["completion_attempt_id"] == str(envelope.event_id)
-    assert "duration" in failed["reason"]
+    assert failed["reason"] == "invalid_payload"  # TD-7: a code, the raw text is in last_error
     assert reply_id is not None
     assert (await _process(billing_sessions, envelope)).duplicate is True
     assert len(await _failed_replies(billing_db, envelope.payload.visit_id)) == 1
@@ -264,5 +264,5 @@ async def test_transient_failures_are_counted_and_the_fifth_emits_billing_failed
     assert await _records(billing_db, envelope.payload.visit_id) == []
     [failed] = await _failed_replies(billing_db, envelope.payload.visit_id)
     assert failed["error_class"] == "transient_exhausted"
-    assert "timeout 4" in failed["reason"]
+    assert failed["reason"] == "transient_errors_exhausted"  # TD-7
     assert (await _process(billing_sessions, envelope)).duplicate is True

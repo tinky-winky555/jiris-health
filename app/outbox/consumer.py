@@ -29,16 +29,19 @@ PREFETCH = 10
 
 Handler = Callable[[RabbitMessage], Awaitable[None]]
 
-_UNAVAILABLE = (
+# Connection-level failures (no usable connection, whatever the SQLSTATE).
+_CONNECTION_ERRORS = (
     OSError,  # includes ConnectionError: refused, reset, host unreachable
     TimeoutError,
-    asyncpg.InterfaceError,  # includes ConnectionDoesNotExistError
-    asyncpg.PostgresConnectionError,
-    asyncpg.CannotConnectNowError,
-    asyncpg.TooManyConnectionsError,
-    OperationalError,
-    InterfaceError,
+    asyncpg.InterfaceError,  # client side; includes ConnectionDoesNotExistError
+    asyncpg.PostgresConnectionError,  # SQLSTATE class 08
+    asyncpg.CannotConnectNowError,  # 57P03
+    asyncpg.TooManyConnectionsError,  # 53300: no connection can be obtained (DL-42)
 )
+# Temporary server conditions (TD-6, DL-39, DL-42): class 08, operator intervention 57P01 to
+# 57P03, serialisation failure 40001, deadlock 40P01 and too many connections 53300. Accepted risk: a deterministic deadlock caused by a bug
+# repeats for ever and shows only as WARNING lines with cause=database_unavailable.
+_TEMPORARY_SQLSTATES = frozenset({"57P01", "57P02", "57P03", "40001", "40P01", "53300"})
 
 
 class MalformedMessage(Exception):
@@ -59,13 +62,25 @@ def error_chain(error: BaseException) -> Iterator[BaseException]:
 
 
 def is_database_unavailable(error: BaseException) -> bool:
-    """True when the database cannot be reached or the connection was lost (DL-31)."""
-    for current in error_chain(error):
+    """True when the database cannot be reached, the connection was lost, or the server
+    reports a temporary condition (DL-31, narrowed by DL-39). A server error with any other
+    SQLSTATE is not an outage: the caller counts it."""
+    chain = list(error_chain(error))
+    for current in chain:
         if isinstance(current, DBAPIError) and current.connection_invalidated:
             return True
-        if isinstance(current, _UNAVAILABLE):
+        if isinstance(current, _CONNECTION_ERRORS):
             return True
-    return False
+    sqlstates = [
+        state for state in (getattr(current, "sqlstate", None) for current in chain)
+        if isinstance(state, str) and state
+    ]
+    if any(state[:2] == "08" or state in _TEMPORARY_SQLSTATES for state in sqlstates):
+        return True
+    if sqlstates:
+        return False
+    # A SQLAlchemy operational or interface error without any SQLSTATE is connection level.
+    return any(isinstance(current, (OperationalError, InterfaceError)) for current in chain)
 
 
 async def raw_body(message: StreamMessage[Any]) -> bytes:

@@ -227,7 +227,7 @@ Failure classes of the Visits consumer (approved by Sasha on 2026-11-11, contrac
 
 - not a valid BillingRecordCreated or BillingFailed envelope of schema version 1, or a payload that fails its validation: reject without requeue to `visits.parking` at once (R9);
 - a reply whose `visit_id` matches no visit: ROLLBACK, an ERROR line, reject without requeue to `visits.parking`;
-- database unavailable or connection lost: ROLLBACK, `nack` with requeue after an exponential backoff (0.5 s doubling to 30 s), without a limit; `attempts` unchanged (D6);
+- database unavailable or connection lost (definition in section 8.2, contract DL-39): ROLLBACK, `nack` with requeue after an exponential backoff (0.5 s doubling to 30 s), without a limit; `attempts` unchanged (D6);
 - any other exception: ROLLBACK; in a short transaction `INSERT ... ON CONFLICT (event_id) DO UPDATE SET attempts = attempts + 1, last_error = ...`; below 5 attempts `nack` with requeue after 1 s; at 5, reject without requeue to `visits.parking` with an ERROR line.
 
 Because the failure counter lives in the inbox row, a row may exist before the reply is processed; `processed_at` is therefore the processed marker, NULL until the reply is applied or ignored. The Visits consumer and the Billing consumer share the subscription and settling mechanics in `app/outbox/consumer.py` (contract DL-33).
@@ -250,9 +250,11 @@ Envelope (R6), defined once in `app.contracts`:
 |---|---|---|
 | VisitCompleted | `visits.visit_completed` | `visit_id`, `completion_attempt_id`, `rate`, `start_date_time`, `end_date_time` |
 | BillingRecordCreated | `billing.record_created` | `visit_id`, `completion_attempt_id`, `billing_record_id`, `amount` |
-| BillingFailed | `billing.failed` | `visit_id`, `completion_attempt_id`, `reason`, `error_class` (`transient_exhausted` or `permanent`) |
+| BillingFailed | `billing.failed` | `visit_id`, `completion_attempt_id`, `reason` (a stable code, below), `error_class` (`transient_exhausted` or `permanent`) |
 
 Money travels as a decimal string (for example `"42.50"`) to avoid float rounding (D28).
+
+BillingFailed `reason` is one of these codes, stored by Visits as `completion_failure_reason` and returned by the API (TD-7, closed in M08): `invalid_payload` (non-positive duration or rate), `amount_out_of_range` (SQLSTATE 22003), `invalid_data` (other class 22), `constraint_violation` (class 23 except 23505), `transient_errors_exhausted`. The raw exception text is kept in `billing.inbox.last_error` only and never reaches an API client. The model keeps `reason: str`; `schema_version` stays 1.
 
 ### 7.1 RabbitMQ topology
 
@@ -315,7 +317,7 @@ Error classes of the relay approved by Sasha on 2026-11-11 (contract DL-19, DL-2
 
 - Several relay instances are safe (`SKIP LOCKED`).
 - Crash after confirm and before COMMIT → the row is published again; receivers de-duplicate.
-- Purge job in the worker: `DELETE FROM <schema>.outbox WHERE published_at < now() - interval '7 days'` (R5, D25).
+- Purge job in the worker (`app/outbox/purge.py`, M08): for each schema as its own role, at start and then every hour, `DELETE FROM <schema>.outbox WHERE event_id IN (SELECT event_id ... WHERE published_at IS NOT NULL AND published_at < now() - interval '7 days' LIMIT 1000 FOR UPDATE SKIP LOCKED)`, batch after batch; unpublished rows are never deleted, whatever their age (R5, D25). One log line per pass with the number of rows deleted.
 
 ### 8.2 Billing consumer (D15, R8, R9)
 
@@ -348,9 +350,9 @@ on message:
 
 Error classes (D15, refined by Sasha on 2026-11-11, contract DL-35 and DL-36):
 
-- database unavailable or connection lost (as the relay and the Visits consumer, `is_database_unavailable`, TD-6): retried with backoff without a limit and never counted, because the counter and BillingFailed are themselves database writes (D6);
+- database unavailable or connection lost (as the relay and the Visits consumer, `is_database_unavailable` in `app/outbox/consumer.py`): retried with backoff without a limit and never counted, because the counter and BillingFailed are themselves database writes (D6). Narrowed in M08 (TD-6, contract DL-39, DL-42): connection errors (OS errors, timeouts, asyncpg connection errors) and the SQLSTATEs 08 (class, connection exception), 57P (57P01 to 57P03, operator intervention), 40001 (serialisation failure), 40P01 (deadlock) and 53300 (too many connections); a SQLAlchemy operational or interface error without any SQLSTATE; any other SQLSTATE is not an outage. Accepted risk: a deterministic deadlock caused by a bug repeats for ever and shows only as WARNING lines with `cause=database_unavailable`;
 - permanent: validation of the payload (non-positive duration or rate, `PermanentError`), and database errors of SQLSTATE class 22 (data exception, for example `22003` when the amount exceeds `numeric(12,2)`) and class 23 (integrity constraint violation), except `23505` `unique_violation`, which stays transient so that a concurrent duplicate delivery is resolved on retry through the inbox and never emits BillingFailed;
-- transient: everything else, including a `RAISE EXCEPTION` (`P0001`), a serialisation failure (`40001`) and a deadlock (`40P01`); retried up to 5 times, counted in `billing.inbox`; unclassified errors count as transient.
+- transient: everything else, including a `RAISE EXCEPTION` (`P0001`) and an `OperationalError` with a SQLSTATE outside the definition above; retried up to 5 times, counted in `billing.inbox`; unclassified errors count as transient. (Until M08, 40001 and 40P01 were transient here; DL-39 moved them to the first class.)
 
 A permanent failure is acknowledged, not parked; its cause stays in `billing.inbox.last_error` and in the visit's `completion_failure_reason`. A message whose inbox row is `failed` is a duplicate on any later delivery, so BillingFailed is written once.
 
@@ -385,7 +387,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA visits
 
 ### 9.1 Roles and migration run (approved by Sasha on 2026-11-11)
 
-- Cluster bootstrap (`docker/postgres/init.sql`, run once by the superuser) creates the login roles `jiris_migrator` (migration owner, `CONNECT, CREATE` on the database), `visits_app` and `billing_app` (`CONNECT` only), and revokes `public` from `PUBLIC`.
+- Cluster bootstrap (`docker/postgres/init.sql`, a template whose passwords are psql variables, run once by the superuser through `docker/postgres/init.sh` with the passwords from `.env`; the tests render it with random passwords, TD-1, contract DL-38) creates the login roles `jiris_migrator` (migration owner, `CONNECT, CREATE` on the database), `visits_app` and `billing_app` (`CONNECT` only), and revokes `public` from `PUBLIC`.
 - The Alembic chains run under `jiris_migrator` (`MIGRATIONS_DATABASE_URL`); they create the schemas and tables, own them, and grant DML to the application roles.
 - Each chain keeps its version table in its own schema (`visits.alembic_version`, `billing.alembic_version`); the chain's `env.py` runs `CREATE SCHEMA IF NOT EXISTS` before Alembic starts, because the version table needs the schema.
 - DML is granted on the module's named tables, not `ON ALL TABLES`, so the application role cannot touch `alembic_version`; `ALTER DEFAULT PRIVILEGES IN SCHEMA` gives the same DML on tables created by later migrations. T7 permanently checks that neither application role can SELECT, INSERT, UPDATE or DELETE on its `alembic_version`.
@@ -400,6 +402,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA visits
 | Relay batch size | 100 | D25 |
 | Relay backoff ceiling | 30 s | D25 |
 | Outbox retention | 7 days | D25 |
+| Outbox purge interval and batch | 1 hour, 1000 rows per batch | M08 |
 | Billing transient retry limit | 5 | D15 |
 | Database URLs | one per role: `VISITS_DATABASE_URL`, `BILLING_DATABASE_URL`; SQLAlchemy form `postgresql+asyncpg://user:password@host:port/db` | decided (D29; URL form approved 2026-11-11) |
 | Broker URL | `RABBITMQ_URL` | decided (D29) |

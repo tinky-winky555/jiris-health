@@ -29,6 +29,7 @@ class Stack:
     visits_dsn: str
     billing_dsn: str
     rabbitmq_url: str
+    passwords: dict[str, str]  # per role, random per session (TD-1, DL-38)
 
 
 async def create_visit(
@@ -433,3 +434,11 @@ async def stop_worker_process(process, timeout: float = 10.0) -> int:
         process.kill()
         process.wait(timeout)
         raise
+
+
+FORBIDDEN_IN_RESPONSES = ("Error", "sqlalchemy", "asyncpg", "Traceback", "overflow", "injected")
+
+
+def assert_no_exception_text(body: str) -> None:
+    """TD-7: no exception text ever reaches an API response."""
+    assert [word for word in FORBIDDEN_IN_RESPONSES if word in body] == [], body

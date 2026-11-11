@@ -33,15 +33,16 @@ live in `contract.md`, not here. Input path B: `docs/PRD.md` and
 | M05 | Billing consumer, happy path | module-05-billing-consumer.md | 10 |
 | M06 | Visits consumer; T1 green | module-06-visits-consumer.md | 8 |
 | M07 | Failure paths in Billing: error classes, counted retries, BillingFailed, parking; T4, T5 | module-07-failure-paths.md | 8 |
-| M08 | Operations and delivery: purge, reconnection, README, release | module-08-operations-delivery.md (to be authored) | 6 |
+| M08 | Technical debt and operations: purge, reconnection proof, TD-1 to TD-4, TD-6, TD-7 | module-08-operations-delivery.md | 11 |
+| M09 | README, definition of complete, release | module-09-release.md (to be authored) | 4 |
 
-Total: 64 hours (M07 reduced from 10 to 8 hours: the Visits side of BillingFailed moved to M06, DL-29). Module documents M04 to M08 are authored by the agent
+Total: 73 hours (M07 reduced from 10 to 8 hours: the Visits side of BillingFailed moved to M06, DL-29; M08 estimated at 15 hours and split into M08, 11 hours, and M09, 4 hours, DL-37). Module documents M04 to M09 are authored by the agent
 one at a time, after the previous module's IG-7 is approved.
 
 ## c. Dependency graph
 
 ```
-M01 -> M02 -> M03 -> M04 -> M05 -> M06 -> M07 -> M08
+M01 -> M02 -> M03 -> M04 -> M05 -> M06 -> M07 -> M08 -> M09
 ```
 
 Rationale:
@@ -55,7 +56,9 @@ Rationale:
   (contract DL-6) and must turn green there.
 - Failure paths (M07) come after the happy path is green end to end, so
   each failure test starts from a working flow.
-- M08 closes the delivery: purge job, reconnection proof, documentation,
+- M08 closes the operational work and the technical debt: purge job,
+  reconnection proof, TD-1 to TD-4, TD-6, TD-7.
+- M09 closes the delivery: README, the audit of section g,
   merge into `main` under HG-3.
 
 ## d. Canonical repository structure
@@ -63,7 +66,7 @@ Rationale:
 ```
 jiris-health/
 ├── CLAUDE.md
-├── README.md                       # M08
+├── README.md                       # M09
 ├── pyproject.toml · uv.lock · .python-version
 ├── .importlinter                   # three contracts
 ├── .gitignore · .env.example
@@ -71,7 +74,9 @@ jiris-health/
 ├── docker-compose.yml              # postgres, rabbitmq, migrate, api, worker
 ├── Dockerfile                      # python:3.15.2-slim
 ├── docker/
-│   └── postgres/init.sql           # login roles and database grants (TDD §9.1); schemas and DML grants live in the Alembic chains
+│   └── postgres/
+│       ├── init.sql                # template: login roles and database grants (TDD §9.1, DL-38)
+│       └── init.sh                 # renders init.sql with the passwords from .env
 ├── app/
 │   ├── contracts/                  # envelope and event models; imports no module
 │   ├── visits/
@@ -82,6 +87,7 @@ jiris-health/
 │   │   └── migrations/             # chain "billing"
 │   ├── outbox/
 │   │   ├── relay.py                # generic relay, per schema and role
+│   │   ├── purge.py                # outbox purge after 7 days (R5, M08)
 │   │   ├── topology.py             # exchanges, queues, bindings; declared by the worker (DL-21)
 │   │   └── consumer.py             # consumer mechanics shared by both modules (DL-33)
 │   ├── main_api.py
@@ -174,7 +180,7 @@ no em or en dashes; concrete wording.
 
 ## g. Definition of complete
 
-1. Every module M01 to M08 has passed its acceptance criteria from a
+1. Every module M01 to M09 has passed its acceptance criteria from a
    clean clone, with its gate reports present (M01 and M02: IG-7 only).
 2. T1 to T8 (PRD §8) pass; T1 passes 50 of 50 runs; no `xfail` remains.
 3. `lint-imports`, `alembic -n visits check` and `alembic -n billing

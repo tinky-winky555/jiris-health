@@ -34,6 +34,7 @@ from app.contracts import (
     new_envelope,
     to_money,
 )
+from app.outbox.consumer import error_chain
 
 MICROSECONDS_PER_HOUR = Decimal(3_600_000_000)
 ACTIVE_RECORD_PREDICATE = text(f"status = '{RECORD_CREATED}'")
@@ -152,8 +153,45 @@ async def process_visit_completed(
 # Failure paths (TDD section 8.2): each runs in its own short transaction after the ROLLBACK
 
 
+# Stable codes for BillingFailed.reason (TD-7, TDD section 7): API clients see these and
+# nothing else; the raw exception text stays in billing.inbox.last_error.
+REASON_INVALID_PAYLOAD = "invalid_payload"
+REASON_AMOUNT_OUT_OF_RANGE = "amount_out_of_range"
+REASON_INVALID_DATA = "invalid_data"
+REASON_CONSTRAINT_VIOLATION = "constraint_violation"
+REASON_TRANSIENT_EXHAUSTED = "transient_errors_exhausted"
+REASON_CODES = frozenset(
+    {
+        REASON_INVALID_PAYLOAD,
+        REASON_AMOUNT_OUT_OF_RANGE,
+        REASON_INVALID_DATA,
+        REASON_CONSTRAINT_VIOLATION,
+        REASON_TRANSIENT_EXHAUSTED,
+    }
+)
+
+
+def failure_reason(error: BaseException, error_class: str) -> str:
+    """The stable code of a failure (TD-7)."""
+    if error_class == "transient_exhausted":
+        return REASON_TRANSIENT_EXHAUSTED
+    for current in error_chain(error):
+        if isinstance(current, PermanentError):
+            return REASON_INVALID_PAYLOAD
+        sqlstate = getattr(current, "sqlstate", None)
+        if isinstance(sqlstate, str) and sqlstate:
+            if sqlstate == "22003":
+                return REASON_AMOUNT_OUT_OF_RANGE
+            if sqlstate[:2] == "22":
+                return REASON_INVALID_DATA
+            if sqlstate[:2] == "23":
+                return REASON_CONSTRAINT_VIOLATION
+    return REASON_INVALID_PAYLOAD
+
+
 def describe(error: BaseException) -> str:
-    """Type and first line of the message; never the payload."""
+    """Type and first line of the message, for billing.inbox.last_error only; never the
+    payload, never sent to Visits or to an API client (TD-7)."""
     first_line = str(error).strip().splitlines()[0] if str(error).strip() else ""
     return f"{type(error).__name__}: {first_line}"
 
@@ -161,6 +199,9 @@ def describe(error: BaseException) -> str:
 def _billing_failed(
     envelope: Envelope[VisitCompleted], reason: str, error_class: str
 ) -> Outbox:
+    """BillingFailed with a stable `reason` code (TD-7)."""
+    if reason not in REASON_CODES:
+        raise ValueError(f"not a reason code: {reason!r}")
     reply = new_envelope(
         BILLING_FAILED,
         BillingFailed(
@@ -207,7 +248,7 @@ async def record_permanent_failure(
     ).scalar_one_or_none()
     if settled is None:
         return None
-    reply = _billing_failed(envelope, reason, "permanent")
+    reply = _billing_failed(envelope, failure_reason(error, "permanent"), "permanent")
     session.add(reply)
     await session.flush()
     return reply.event_id
@@ -255,7 +296,7 @@ async def count_transient_failure(
         .where(Inbox.event_id == envelope.event_id)
         .values(status=INBOX_FAILED, processed_at=func.now())
     )
-    reply = _billing_failed(envelope, last_error, "transient_exhausted")
+    reply = _billing_failed(envelope, REASON_TRANSIENT_EXHAUSTED, "transient_exhausted")
     session.add(reply)
     await session.flush()
     return TransientCount(attempts=attempts, exhausted=True, reply_event_id=reply.event_id)

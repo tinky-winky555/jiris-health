@@ -89,3 +89,43 @@ async def test_worker_bills_a_completion_and_stops_on_sigterm(
     assert "outcome=processed" in log
     assert f"event consumed module=visits event_id={reply_id}" in log
     assert "outcome=completed" in log
+
+
+# Purge in the worker (module-08 task 3.1.2) and FastStream logs in our format (3.1.10)
+
+
+async def test_worker_purges_both_outboxes_at_start(
+    stack: Stack, visits_db: asyncpg.Connection, billing_db: asyncpg.Connection, tmp_path: Path
+) -> None:
+    import json
+    import uuid
+
+    from tests.integration.helpers import start_worker_process, stop_worker_process
+
+    ids = {}
+    for schema, conn in (("visits", visits_db), ("billing", billing_db)):
+        ids[schema] = uuid.uuid7()
+        await conn.execute(
+            f"INSERT INTO {schema}.outbox (event_id, event_type, schema_version, payload, occurred_at, published_at)"
+            " VALUES ($1, 'VisitCompleted', 1, $2::jsonb, now() - interval '9 days', now() - interval '9 days')",
+            ids[schema],
+            json.dumps({"purge": True}),
+        )
+    await purge_queues(stack.rabbitmq_url, ("billing.inbox", "visits.inbox"))
+    log_path = tmp_path / "worker.log"
+    process = start_worker_process(stack.env, log_path)
+    try:
+        async def purged() -> bool:
+            text = log_path.read_text() if log_path.exists() else ""
+            return "outbox purged schema=visits" in text and "outbox purged schema=billing" in text
+
+        await wait_until(purged, timeout=30.0, message="no purge pass logged")
+        for schema, conn in (("visits", visits_db), ("billing", billing_db)):
+            assert await conn.fetchval(
+                f"SELECT count(*) FROM {schema}.outbox WHERE event_id = $1", ids[schema]
+            ) == 0
+    finally:
+        assert await stop_worker_process(process) == 0, log_path.read_text()
+    log = log_path.read_text()
+    assert "\x1b[" not in log  # FastStream's coloured lines are gone (DL-41)
+    assert "waiting for messages" not in log  # its INFO lines stay below WARNING
