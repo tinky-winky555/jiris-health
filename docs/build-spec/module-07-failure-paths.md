@@ -98,21 +98,23 @@ code at completion (IG-6).
 
 ## 5. Acceptance criteria
 
-- [ ] Every test of task 4.1 passes.
-- [ ] T4 passes end to end: visit back to its source status with
+- [x] Every test of task 4.1 passes.
+- [x] T4 passes end to end: visit back to its source status with
   `completion_failure_reason`, and `/complete` accepted again.
-- [ ] T5 passes end to end: the counter survives a worker restart and
+- [x] T5 passes end to end: the counter survives a worker restart and
   BillingFailed `transient_exhausted` follows the fifth attempt.
-- [ ] A permanent error is never retried; a database outage is never
+- [x] A permanent error is never retried; a database outage is never
   counted; no failure ever creates a billing record.
-- [ ] 4.1.11 passes: a concurrent duplicate delivery gives one record and
+- [x] 4.1.11 passes: a concurrent duplicate delivery gives one record and
   no BillingFailed.
-- [ ] The suite passes in file order and with the T1 module first; T1
+- [x] The suite passes in file order and with the T1 module first; T1
   50 of 50.
-- [ ] `uv run lint-imports` reports 3 contracts kept; both `alembic
+- [x] `uv run lint-imports` reports 3 contracts kept; both `alembic
   check` pass; T7 passes.
-- [ ] Collected test count is at least 325 plus the new tests, minus the
+- [x] Collected test count is at least 325 plus the new tests, minus the
   replaced M05 test.
+
+Completion report: `gate-report-M07-IG-7.md`.
 
 ## 6. Out of scope
 
