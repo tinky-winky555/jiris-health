@@ -81,15 +81,17 @@ log line per command with `visit_id`, `event_id` where present, outcome.
 
 ## 4. Acceptance criteria
 
-- [ ] Every test of task 3.1 passes.
-- [ ] 3.1.6 passes 50 of 50 runs.
-- [ ] After a `/complete`, `SELECT count(*) FROM visits.outbox WHERE
+- [x] Every test of task 3.1 passes.
+- [x] 3.1.6 passes 50 of 50 runs.
+- [x] After a `/complete`, `SELECT count(*) FROM visits.outbox WHERE
   published_at IS NULL` for the visit under test equals 1 (DL-15) and the row's payload validates against the VisitCompleted model.
-- [ ] The API process opens no connection as `billing_app` (verified by
+- [x] The API process opens no connection as `billing_app` (verified by
   configuration and by T7 still passing).
-- [ ] `uv run lint-imports` passes; `alembic -n visits check` and
+- [x] `uv run lint-imports` passes; `alembic -n visits check` and
   `alembic -n billing check` pass.
-- [ ] Collected test count is at least the M02 total plus the new tests.
+- [x] Collected test count is at least the M02 total plus the new tests.
+
+Completion report: `gate-report-M03-IG-7.md`.
 
 ## 5. Out of scope
 

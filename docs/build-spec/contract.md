@@ -121,8 +121,9 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. Awaiting the developer's review of the report. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. Awaiting the developer's review of the report. |
 | T1 | `xfail(strict=True, raises=WorkerNotReady)`, reason "needs relay and consumers; removed in M06" (DL-6, DL-17). 50 of 50 runs reported xfailed, at setup, with `WorkerNotReady`: the worker is not built. |
-| Test count | 73 collected: 23 passed, 50 xfailed (adoption commit on `build/increments`). This is the baseline for M03. |
-| Current module | M03, Visits API, completion endpoint and outbox write, in progress on `feature/m03-visits-api-and-outbox` (from `build/increments` at `8c1a741`, pushed to origin). The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
+| Test count | 181 collected: 131 passed, 50 xfailed, on `feature/m03-visits-api-and-outbox` (M03 completion). Baseline before M03: 73. |
+| M03, Visits API and outbox | Complete on `feature/m03-visits-api-and-outbox` (from `build/increments` at `8c1a741`; not merged, not pushed). Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
+| Current module | None open. M04 (outbox relay and broker topology) is authored after the developer approves the M03 IG-7 report. |
 | Last approved gate | HG-1 on module-03 and `gate-report-M03-IG-3.md`, 2026-11-11. |
 | Next pending gate | Developer review of `gate-report-M03-IG-7.md`, then the BS-3 merge. |
 | Blockers | None. |
@@ -183,3 +184,4 @@ Mirrors open entries in `docs/technical-debt.md`.
 | TD-1 | Local development credentials written in compose, init.sql and test fixtures | Open |
 | TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Open |
 | TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Open |
+| TD-4 | Rejected creation requests (422) leave no command log line | Open |
