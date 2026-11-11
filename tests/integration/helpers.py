@@ -369,3 +369,67 @@ def billing_reply(
             amount=Decimal("50.00"),
         ),
     )
+
+
+class failing_insert_trigger:
+    """Make every INSERT of a billing record for one visit raise P0001 (a transient,
+    unclassified error), as jiris_migrator, for the duration of a test (module-07)."""
+
+    def __init__(self, stack: Stack, visit_id) -> None:
+        self._dsn = stack.env["MIGRATIONS_DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://", 1)
+        self._visit_id = str(visit_id)
+        self._name = f"m07_fail_{uuid.uuid4().hex[:12]}"
+
+    async def __aenter__(self) -> "failing_insert_trigger":
+        import asyncpg
+
+        self._conn = await asyncpg.connect(self._dsn)
+        await self._conn.execute(
+            f"CREATE FUNCTION billing.{self._name}() RETURNS trigger LANGUAGE plpgsql AS"
+            " $$ BEGIN RAISE EXCEPTION 'injected failure for the M07 test'; END $$"
+        )
+        await self._conn.execute(
+            f"CREATE TRIGGER {self._name} BEFORE INSERT ON billing.billing_record FOR EACH ROW"
+            f" WHEN (NEW.visit_id = '{self._visit_id}'::uuid) EXECUTE FUNCTION billing.{self._name}()"
+        )
+        return self
+
+    async def drop(self) -> None:
+        await self._conn.execute(f"DROP TRIGGER IF EXISTS {self._name} ON billing.billing_record")
+        await self._conn.execute(f"DROP FUNCTION IF EXISTS billing.{self._name}()")
+
+    async def __aexit__(self, *exc: object) -> None:
+        try:
+            await self.drop()
+        finally:
+            await self._conn.close()
+
+
+def start_worker_process(env: dict[str, str], log_path) -> "subprocess.Popen":
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    with open(log_path, "ab") as log:  # the child keeps its own copy of the handle
+        return subprocess.Popen(
+            [sys.executable, "-m", "app.main_worker"],
+            cwd=root,
+            env={**os.environ, **env},
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+
+
+async def stop_worker_process(process, timeout: float = 10.0) -> int:
+    import signal
+
+    if process.poll() is None:
+        process.send_signal(signal.SIGTERM)
+    try:
+        return await asyncio.to_thread(process.wait, timeout)
+    except Exception:
+        process.kill()
+        process.wait(timeout)
+        raise
