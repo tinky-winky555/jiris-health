@@ -65,7 +65,7 @@ section 6.
 
 | Pattern | Rule |
 |---|---|
-| Error shape | 409 body `{"reason": "completion_pending" \| "invalid_status"}`; 404 empty; 422 FastAPI validation body |
+| Error shape | 409 body `{"reason": "completion_pending" \| "invalid_status"}`; 404 body `{"detail": "Not Found"}` (DL-10); 422 FastAPI validation body |
 | Response codes | Create 201 with the visit; `/start`, `/cancel`, `/missed` 200 with the visit; `/complete` 202 with the visit; list endpoints return a JSON array; no pagination |
 | Transactions | One transaction per HTTP command and per consumed message; state change and outbox row in the same transaction |
 | Idempotency | Inbox insert `ON CONFLICT (event_id) DO NOTHING` first; processed → ack without effect; `message_id` = `event_id` |
@@ -120,11 +120,12 @@ retrospectively.
 | Index | Approved (HG-1) by Sasha on 2026-11-11, with the adoption corrections of DL-9. |
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. Awaiting the developer's review of the report. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. Awaiting the developer's review of the report. |
-| T1 | `xfail(strict=True)`, reason "needs relay and consumers; removed in M06" (DL-6). 50 of 50 runs reported xfailed, at setup: the worker fixture is not ready because the worker is not built. |
-| Test count | 73 collected: 23 passed, 50 xfailed (adoption commit on `build/increments`). This is the baseline for M03. |
-| Current module | M03, Visits API, completion endpoint and outbox write. Branch `feature/m03-visits-api-and-outbox` created from `build/increments`. The pre-contract M03 draft is parked as a patch outside the repository (DL-8). Planning report `gate-report-M03-IG-3.md`: written on the feature branch, uncommitted until HG-1. |
-| Last approved gate | HG-1 on this contract and the index, 2026-11-11. |
-| Next pending gate | HG-1 on module-03 and `gate-report-M03-IG-3.md`. |
+| T1 | `xfail(strict=True, raises=WorkerNotReady)`, reason "needs relay and consumers; removed in M06" (DL-6, DL-17). 50 of 50 runs reported xfailed, at setup, with `WorkerNotReady`: the worker is not built. |
+| Test count | 181 collected: 131 passed, 50 xfailed, on `feature/m03-visits-api-and-outbox` (M03 completion). Baseline before M03: 73. |
+| M03, Visits API and outbox | Complete on `feature/m03-visits-api-and-outbox` (from `build/increments` at `8c1a741`; not merged, not pushed). Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
+| Current module | None open. M04 (outbox relay and broker topology) is authored after the developer approves the M03 IG-7 report. |
+| Last approved gate | HG-1 on module-03 and `gate-report-M03-IG-3.md`, 2026-11-11. |
+| Next pending gate | Developer review of `gate-report-M03-IG-7.md`, then the BS-3 merge. |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -147,6 +148,11 @@ repository.
 | DL-10 | 2026-11-11 | 404 responses keep the FastAPI body `{"detail": "Not Found"}`; TDD §6.3 and contract §3 are updated in M03 (IG-6) | approved by the developer (HG-2); applied in M03 |
 | DL-11 | 2026-11-11 | `/start` on a visit with a pending completion returns 409 `completion_pending`, like `/cancel` and `/missed` (extends R2); TDD §6 updated in M03 | approved by the developer (HG-2); applied in M03 |
 | DL-12 | 2026-11-11 | Visit creation also returns 422 for a `rate` with more than 2 decimal places and for unknown fields (extends FR11); TDD §6.1 updated in M03 | approved by the developer (HG-2); applied in M03 |
+| DL-13 | 2026-11-11 | Visit creation returns 422 for timestamps without a time zone (extends FR11); TDD §6.1 updated in M03 | approved by the developer (HG-2, OQ-5); applied in M03 |
+| DL-14 | 2026-11-11 | M03 adds only the envelope and VisitCompleted to `app.contracts`; BillingRecordCreated, BillingFailed and the exchange constants come with M04 to M06 | approved by the developer (OQ-6) |
+| DL-15 | 2026-11-11 | M03 criterion on the outbox count is evaluated for the visit under test, because integration tests share one database | approved by the developer (OQ-7) |
+| DL-16 | 2026-11-11 | M03 task 3.1 gains a deterministic row-lock test (3.1.7) and a re-completion after reset test (3.1.8) | approved by the developer (OQ-8) |
+| DL-17 | 2026-11-11 | The T1 marker is narrowed to `xfail(strict=True, raises=WorkerNotReady)`: the worker fixture raises `WorkerNotReady` when no consumer appears on both inbox queues, and any other error fails T1. Refines DL-6 | approved by the developer |
 
 ## 7. Open questions and technical debt
 
@@ -163,7 +169,11 @@ Resolved questions, kept for traceability:
 | OQ-1 | Approve DL-1 (per-table grants and default privileges instead of `ON ALL TABLES`)? | Approved; the `alembic_version` check in T7 stays permanently | DL-1 |
 | OQ-2 | Red T1 until M06, or `xfail(strict=True)`? | `xfail(strict=True)`, reason names M06 | DL-6 |
 | OQ-3 | Approve BS-3? | Approved without pull requests: local `git merge --no-ff` with `Merge MNN <slug>: IG-7 approved`, then `git push` | DL-7, BS-3 |
-| OQ-4 | What to do with the M03 draft written before the contract? | Patch outside the repository, clean working tree, tests first after HG-1 on module-03 | DL-8 |
+| OQ-4 | What to do with the M03 draft written before the contract? | Patch outside the repository (`~/Code/jiris/m03-draft/`), clean working tree, tests first after HG-1 on module-03 | DL-8 |
+| OQ-5 | M03: reject naive timestamps at creation with 422? | Yes | DL-13 |
+| OQ-6 | M03: limit `app.contracts` to the envelope and VisitCompleted? | Yes | DL-14 |
+| OQ-7 | M03: outbox count criterion "for the visit under test"? | Yes | DL-15 |
+| OQ-8 | M03: add the row-lock test and the reset test? | Yes | DL-16 |
 
 ### 7b. Technical debt summary
 
@@ -173,3 +183,5 @@ Mirrors open entries in `docs/technical-debt.md`.
 |---|---|---|
 | TD-1 | Local development credentials written in compose, init.sql and test fixtures | Open |
 | TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Open |
+| TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Open |
+| TD-4 | Rejected creation requests (422) leave no command log line | Open |
