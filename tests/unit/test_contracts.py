@@ -102,3 +102,57 @@ def test_new_envelope_refuses_a_payload_of_another_type() -> None:
     other = EventSpec("Other", "visits.other", Other)
     with pytest.raises(TypeError):
         new_envelope(other, _visit_completed())
+
+
+# BillingRecordCreated (M05, contract DL-26)
+
+
+def _record_created(amount: Decimal = Decimal("50.00")) -> "BillingRecordCreated":
+    from app.contracts import BillingRecordCreated
+
+    return BillingRecordCreated(
+        visit_id=uuid.uuid7(),
+        completion_attempt_id=uuid.uuid7(),
+        billing_record_id=uuid.uuid7(),
+        amount=amount,
+    )
+
+
+def test_billing_record_created_type_routing_key_and_version_match_tdd() -> None:
+    from app.contracts import BILLING_RECORD_CREATED, EVENTS, BillingRecordCreated, routing_key_for
+
+    assert BILLING_RECORD_CREATED.event_type == "BillingRecordCreated"
+    assert BILLING_RECORD_CREATED.routing_key == "billing.record_created"
+    assert BILLING_RECORD_CREATED.schema_version == 1
+    assert BILLING_RECORD_CREATED.payload_type is BillingRecordCreated
+    assert EVENTS["BillingRecordCreated"] is BILLING_RECORD_CREATED
+    assert routing_key_for("BillingRecordCreated") == "billing.record_created"
+
+
+def test_billing_record_created_wire_shape_and_money() -> None:
+    wire = json.loads(_record_created(Decimal("42.5")).model_dump_json())
+    assert set(wire) == {"visit_id", "completion_attempt_id", "billing_record_id", "amount"}
+    assert wire["amount"] == "42.50"
+
+
+def test_billing_record_created_refuses_a_float_amount() -> None:
+    from app.contracts import BillingRecordCreated
+
+    with pytest.raises(ValidationError):
+        BillingRecordCreated.model_validate_json(
+            json.dumps(
+                {
+                    "visit_id": str(uuid.uuid7()),
+                    "completion_attempt_id": str(uuid.uuid7()),
+                    "billing_record_id": str(uuid.uuid7()),
+                    "amount": 42.5,
+                }
+            )
+        )
+
+
+def test_billing_failed_is_not_registered_yet() -> None:
+    """DL-26: BillingFailed arrives with M06 or M07."""
+    from app.contracts import routing_key_for
+
+    assert routing_key_for("BillingFailed") is None
