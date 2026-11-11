@@ -118,20 +118,22 @@ the topology is declared, with the `billing_app` pool.
 
 ## 5. Acceptance criteria
 
-- [ ] Every test of task 4.1 passes.
-- [ ] T2: one VisitCompleted delivered twice gives one record and one
+- [x] Every test of task 4.1 passes.
+- [x] T2: one VisitCompleted delivered twice gives one record and one
   reply (4.1.4, 4.1.5).
-- [ ] T8 amount half passes (4.1.1).
-- [ ] A consumed message is acknowledged only after COMMIT: 4.1.9 shows
+- [x] T8 amount half passes (4.1.1).
+- [x] A consumed message is acknowledged only after COMMIT: 4.1.9 shows
   redelivery after a failed transaction, 4.1.7 shows no redelivery after
   success.
-- [ ] No source under `app/billing` or `app/visits` declares a queue or
+- [x] No source under `app/billing` or `app/visits` declares a queue or
   binds one (4.1.11).
-- [ ] `uv run lint-imports` reports 3 contracts kept; `alembic -n visits
+- [x] `uv run lint-imports` reports 3 contracts kept; `alembic -n visits
   check` and `alembic -n billing check` pass; T7 passes.
-- [ ] T1 remains collected 50 times and reported xfailed with
+- [x] T1 remains collected 50 times and reported xfailed with
   `WorkerNotReady`.
-- [ ] Collected test count is at least 217 plus the new tests.
+- [x] Collected test count is at least 217 plus the new tests.
+
+Completion report: `gate-report-M05-IG-7.md`.
 
 ## 6. Out of scope
 
