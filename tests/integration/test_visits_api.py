@@ -17,7 +17,7 @@ import pytest
 from app.contracts import VisitCompleted
 from tests.integration.helpers import Stack, create_visit, start_visit
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_foreign_consumers")]  # DL-32
 
 RACE_RUNS = 50  # module-03 criterion: 3.1.6 passes 50 of 50 runs
 LOCK_WAIT_TIMEOUT_S = 10.0

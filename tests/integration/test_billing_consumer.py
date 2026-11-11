@@ -29,7 +29,10 @@ from tests.integration.helpers import (
     wait_until,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("clean_queues")]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.usefixtures("no_foreign_consumers", "clean_queues"),  # DL-32, DL-27
+]
 
 CONSUMER_LOGGER = "app.billing.consumer"
 ROUTING_KEY = VISIT_COMPLETED.routing_key

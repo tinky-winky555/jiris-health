@@ -151,8 +151,35 @@ def test_billing_record_created_refuses_a_float_amount() -> None:
         )
 
 
-def test_billing_failed_is_not_registered_yet() -> None:
-    """DL-26: BillingFailed arrives with M06 or M07."""
-    from app.contracts import routing_key_for
+def test_billing_failed_type_routing_key_and_fields_match_tdd() -> None:
+    """DL-29 (reverses DL-26 for BillingFailed): registered from M06."""
+    from app.contracts import BILLING_FAILED, EVENTS, BillingFailed, routing_key_for
 
-    assert routing_key_for("BillingFailed") is None
+    assert (BILLING_FAILED.event_type, BILLING_FAILED.routing_key) == ("BillingFailed", "billing.failed")
+    assert BILLING_FAILED.schema_version == 1
+    assert EVENTS["BillingFailed"] is BILLING_FAILED
+    assert routing_key_for("BillingFailed") == "billing.failed"
+    assert set(BillingFailed.model_fields) == {
+        "visit_id",
+        "completion_attempt_id",
+        "reason",
+        "error_class",
+    }
+
+
+@pytest.mark.parametrize("error_class", ["transient_exhausted", "permanent"])
+def test_billing_failed_accepts_the_two_error_classes(error_class: str) -> None:
+    from app.contracts import BillingFailed
+
+    BillingFailed(
+        visit_id=uuid.uuid7(), completion_attempt_id=uuid.uuid7(), reason="x", error_class=error_class
+    )
+
+
+def test_billing_failed_refuses_another_error_class() -> None:
+    from app.contracts import BillingFailed
+
+    with pytest.raises(ValidationError):
+        BillingFailed(
+            visit_id=uuid.uuid7(), completion_attempt_id=uuid.uuid7(), reason="x", error_class="other"
+        )

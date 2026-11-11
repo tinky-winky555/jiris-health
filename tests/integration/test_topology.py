@@ -7,7 +7,10 @@ import pytest
 
 from tests.integration.helpers import Stack, collect_messages
 
-pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("clean_queues")]  # DL-27
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.usefixtures("no_foreign_consumers", "clean_queues"),  # DL-32, DL-27
+]
 
 QUEUES = ("billing.inbox", "visits.inbox", "billing.parking", "visits.parking")
 

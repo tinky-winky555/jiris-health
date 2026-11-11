@@ -3,14 +3,14 @@
 Imports nothing from app.visits or app.billing (import-linter). M03 defines the
 envelope and VisitCompleted; the Billing replies arrive with M05 and M06 (contract DL-14).
 M04 adds the exchange names and the event type to routing key registry (DL-21).
-M05 adds BillingRecordCreated (DL-26).
+M05 adds BillingRecordCreated (DL-26); M06 adds BillingFailed (DL-29).
 """
 
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator,
@@ -85,6 +85,15 @@ class BillingRecordCreated(Payload):
     amount: Money
 
 
+class BillingFailed(Payload):
+    """Billing to Visits: no record for this completion attempt (FR7, FR8, D15, D16)."""
+
+    visit_id: uuid.UUID
+    completion_attempt_id: uuid.UUID
+    reason: str
+    error_class: Literal["transient_exhausted", "permanent"]
+
+
 class Envelope[P: Payload](BaseModel):
     """Common envelope of every event (R6)."""
 
@@ -111,10 +120,11 @@ VISIT_COMPLETED = EventSpec("VisitCompleted", "visits.visit_completed", VisitCom
 BILLING_RECORD_CREATED = EventSpec(
     "BillingRecordCreated", "billing.record_created", BillingRecordCreated
 )
+BILLING_FAILED = EventSpec("BillingFailed", "billing.failed", BillingFailed)
 
 # Every event the system can publish, by event type. The outbox relay routes only these.
 EVENTS: dict[str, EventSpec] = {
-    spec.event_type: spec for spec in (VISIT_COMPLETED, BILLING_RECORD_CREATED)
+    spec.event_type: spec for spec in (VISIT_COMPLETED, BILLING_RECORD_CREATED, BILLING_FAILED)
 }
 
 
@@ -143,11 +153,13 @@ def new_envelope[P: Payload](
 
 
 __all__ = [
+    "BILLING_FAILED",
     "BILLING_RECORD_CREATED",
     "DEAD_LETTER_EXCHANGE",
     "EVENTS",
     "EXCHANGE",
     "VISIT_COMPLETED",
+    "BillingFailed",
     "BillingRecordCreated",
     "Envelope",
     "EventSpec",

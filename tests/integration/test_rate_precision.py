@@ -14,7 +14,7 @@ from decimal import Decimal
 import asyncpg
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_foreign_consumers")]  # DL-32
 
 ACCEPTED = ["0.10", "19.99"]
 REJECTED = ["1.005"]
