@@ -3,8 +3,8 @@
 Run with: python -m app.main_worker
 
 The worker declares the RabbitMQ topology, runs the outbox relays of both schemas and
-the Billing consumer, each with its own role and pool (D13, D19). The Visits consumer
-arrives with M06, the purge job with M08. SIGTERM and SIGINT stop the consumers and
+both consumers, each with its own role and pool (D13, D19); it is ready once both inbox
+queues have a consumer (TDD section 11). The purge job arrives with M08. SIGTERM and SIGINT stop the consumers and
 the relays after their running message or pass; the process then exits 0.
 """
 
@@ -18,6 +18,7 @@ from faststream.rabbit.schemas import Channel
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from app.billing import consumer as billing_consumer
+from app.visits import consumer as visits_consumer
 
 from app.outbox.relay import BACKOFF_CEILING_S, POLL_INTERVAL_S, OutboxRelay, backoff_delays
 from app.outbox.topology import declare_topology
@@ -77,6 +78,7 @@ async def run() -> None:
     billing_consumer.register(
         broker, async_sessionmaker(engines["billing"], expire_on_commit=False)
     )
+    visits_consumer.register(broker, async_sessionmaker(engines["visits"], expire_on_commit=False))
     try:
         if not await _connect(broker, stop):
             return
