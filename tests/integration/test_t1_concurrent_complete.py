@@ -30,6 +30,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.parametrize("run", range(T1_RUNS))
 async def test_t1_concurrent_complete_yields_one_winner_and_one_billing_record(
     run: int,
+    worker,
     make_client,
     visits_db: asyncpg.Connection,
     billing_db: asyncpg.Connection,

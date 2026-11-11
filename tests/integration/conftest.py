@@ -150,8 +150,11 @@ def worker(stack: Stack, tmp_path_factory: pytest.TempPathFactory) -> Iterator[s
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def api_app(stack: Stack, worker: subprocess.Popen) -> AsyncIterator[object]:
-    """The API application in process, configured from the same environment as compose."""
+async def api_app(stack: Stack) -> AsyncIterator[object]:
+    """The API application in process, configured from the same environment as compose.
+
+    It does not depend on the worker: tests that need the full flow request `worker`.
+    """
     os.environ.update(stack.env)
     from app.main_api import create_app
 
