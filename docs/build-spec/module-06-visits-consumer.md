@@ -129,22 +129,24 @@ its opposite (DL-29); every other M05 test passes unchanged (DL-33).
 
 ## 5. Acceptance criteria
 
-- [ ] Every test of task 4.1 passes.
-- [ ] T1 passes 50 of 50 runs with no `xfail` marker left in the suite.
-- [ ] T3 passes: Completed with one record after the broker restart, no
+- [x] Every test of task 4.1 passes.
+- [x] T1 passes 50 of 50 runs with no `xfail` marker left in the suite.
+- [x] T3 passes: Completed with one record after the broker restart, no
   manual step, no worker restart.
-- [ ] T6 passes: a reply with an old attempt id is ignored.
-- [ ] 4.1.11 and 4.1.16 pass: a database outage never parks a reply; a
+- [x] T6 passes: a reply with an old attempt id is ignored.
+- [x] 4.1.11 and 4.1.16 pass: a database outage never parks a reply; a
   stable failure parks it after 5 counted attempts and does not block the
   next reply.
-- [ ] `alembic -n visits downgrade -1` then `upgrade head` succeeds on a
+- [x] `alembic -n visits downgrade -1` then `upgrade head` succeeds on a
   throwaway database.
-- [ ] The idempotency test of the Visits consumer passes (4.1.4).
-- [ ] The suite passes in file order and with the T1 module first; the
+- [x] The idempotency test of the Visits consumer passes (4.1.4).
+- [x] The suite passes in file order and with the T1 module first; the
   isolation guard of 4.1.15 never fires.
-- [ ] `uv run lint-imports` reports 3 contracts kept; both `alembic
+- [x] `uv run lint-imports` reports 3 contracts kept; both `alembic
   check` pass; T7 passes.
-- [ ] Collected test count is at least 276 plus the new tests.
+- [x] Collected test count is at least 276 plus the new tests.
+
+Completion report: `gate-report-M06-IG-7.md`.
 
 ## 6. Out of scope
 
