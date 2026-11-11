@@ -2,10 +2,10 @@
 
 Run with: python -m app.main_worker
 
-As of M04 the worker declares the RabbitMQ topology and runs the outbox relays of
-both schemas, each with its own role and pool (D13, D19). The consumers arrive with
-M05 and M06, the purge job with M08. SIGTERM and SIGINT stop the relays after their
-running pass; the process then exits 0.
+The worker declares the RabbitMQ topology, runs the outbox relays of both schemas and
+the Billing consumer, each with its own role and pool (D13, D19). The Visits consumer
+arrives with M06, the purge job with M08. SIGTERM and SIGINT stop the consumers and
+the relays after their running message or pass; the process then exits 0.
 """
 
 import asyncio
@@ -15,7 +15,9 @@ import signal
 
 from faststream.rabbit import RabbitBroker
 from faststream.rabbit.schemas import Channel
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+
+from app.billing import consumer as billing_consumer
 
 from app.outbox.relay import BACKOFF_CEILING_S, POLL_INTERVAL_S, OutboxRelay, backoff_delays
 from app.outbox.topology import declare_topology
@@ -72,11 +74,16 @@ async def run() -> None:
     }
     # Publisher confirms are on by default; a returned mandatory message raises (DL-20).
     broker = RabbitBroker(_required_env("RABBITMQ_URL"), default_channel=Channel(on_return_raises=True))
+    billing_consumer.register(
+        broker, async_sessionmaker(engines["billing"], expire_on_commit=False)
+    )
     try:
         if not await _connect(broker, stop):
             return
         await declare_topology(broker)
         logger.info("topology declared")
+        await broker.start()  # subscribers start consuming once the topology exists
+        logger.info("consumers started")
         relays = [
             OutboxRelay(schema=schema, engine=engine, broker=broker)
             for schema, engine in engines.items()
