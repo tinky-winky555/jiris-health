@@ -131,7 +131,7 @@ retrospectively.
 | M08, technical debt and operations | Complete on `feature/m08-operations-delivery` (from `build/increments` at `64ef30c`; not merged, not pushed). Completion report `gate-report-M08-IG-7.md`: 9 of 9 criteria met; no technical debt open. |
 | Current module | None open. M09 (README, definition of complete, release; 4 hours) is authored after the developer approves the M08 IG-7 report. |
 | Last approved gate | HG-1 on module-08 and `gate-report-M08-IG-3.md`, 2026-11-11. |
-| Next pending gate | Developer review of `gate-report-M08-IG-7.md` (including the 53300 classification), then the BS-3 merge. |
+| Next pending gate | BS-3 merge of M08 (IG-7 approved, 53300 decided as DL-42). |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -183,6 +183,7 @@ repository.
 | DL-39 | 2026-11-11 | TDD §8.2 and §6.4 amended (TD-6): `is_database_unavailable()` covers connection errors, SQLSTATE class 08, 57P01 to 57P03, 40001 and 40P01; any other `OperationalError` is counted. In Billing, 40001 and 40P01 move from counted (DL-36) to not counted. Accepted risk: a deterministic deadlock caused by a bug repeats for ever and is visible only in the logs (WARNING lines with `cause=database_unavailable`) (OQ-26) | approved by the developer (HG-2), risk accepted |
 | DL-40 | 2026-11-11 | TD-2 is part of M08 (OQ-27) | approved by the developer |
 | DL-41 | 2026-11-11 | M08 also delivers a restart policy for `api` and `worker`, FastStream's own log lines at WARNING in the application format, and a `migrate` service that receives only `MIGRATIONS_DATABASE_URL` (OQ-28) | approved by the developer |
+| DL-42 | 2026-11-11 | SQLSTATE 53300 `too_many_connections` is a temporary condition (database unavailable: backoff, not counted), with 08, 57P, 40001 and 40P01; TD-6 and TDD §8.2 list it; held by tests in `test_consumer_mechanics.py` and `test_billing_classify.py`. Recorded as DL-42 because DL-40 was already taken (TD-2) | approved by the developer (HG-2) |
 
 ## 7. Open questions and technical debt
 

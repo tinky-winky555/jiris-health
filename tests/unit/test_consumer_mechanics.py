@@ -87,3 +87,22 @@ def test_temporary_sqlstates_are_unavailable(orig: BaseException) -> None:
 )
 def test_operational_error_with_another_sqlstate_is_counted(orig: BaseException) -> None:
     assert not is_database_unavailable(OperationalError("SELECT 1", None, orig))
+
+
+# DL-42 (HG-2): 53300 too_many_connections is a temporary condition, not counted
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(asyncpg.TooManyConnectionsError("too many"), id="asyncpg"),
+        pytest.param(_wrapped(asyncpg.TooManyConnectionsError("too many")), id="dbapi-wrapped"),
+        pytest.param(
+            OperationalError("SELECT 1", None, asyncpg.TooManyConnectionsError("too many")),
+            id="operational-wrapped",
+        ),
+    ],
+)
+def test_too_many_connections_is_database_unavailable(error: BaseException) -> None:
+    assert asyncpg.TooManyConnectionsError.sqlstate == "53300"
+    assert is_database_unavailable(error)

@@ -116,7 +116,7 @@ Branch and count after each commit: `git branch --show-current` returned
 
 | Risk or follow-up | Impact | Handling |
 |---|---|---|
-| TD-6 keeps SQLSTATE 53300 (too many connections) as unavailable, through `asyncpg.TooManyConnectionsError`, although the TD-6 list names 08, 57P, 40001 and 40P01 only | Under connection exhaustion a reply is retried without counting instead of being counted towards parking | For the developer's approval at this gate: counting 53300 could fail billing under load for want of a connection, which no retry limit should decide |
+| TD-6 keeps SQLSTATE 53300 (too many connections) as unavailable, through `asyncpg.TooManyConnectionsError`, although the TD-6 list names 08, 57P, 40001 and 40P01 only | Under connection exhaustion a reply is retried without counting instead of being counted towards parking | Decided by the developer at IG-7 approval: 53300 stays temporary (DL-42, HG-2); TD-6, TDD §8.2 and the code list it, and tests hold it (`test_too_many_connections_is_database_unavailable`, `test_database_unavailable[53300-too-many-connections]`) |
 | Accepted risk (DL-39): a deterministic deadlock or serialisation failure from a bug repeats for ever | Visible only as WARNING lines with `cause=database_unavailable` | Accepted by the developer |
 | `docker compose up` now needs a filled `.env` | A new developer who skips it gets a compose error naming the variable | README in M09 |
 | Inbox tables grow without bound | Storage growth over time | FB-5, next release |

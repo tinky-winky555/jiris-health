@@ -36,12 +36,12 @@ _CONNECTION_ERRORS = (
     asyncpg.InterfaceError,  # client side; includes ConnectionDoesNotExistError
     asyncpg.PostgresConnectionError,  # SQLSTATE class 08
     asyncpg.CannotConnectNowError,  # 57P03
-    asyncpg.TooManyConnectionsError,  # 53300: no connection can be obtained
+    asyncpg.TooManyConnectionsError,  # 53300: no connection can be obtained (DL-42)
 )
-# Temporary server conditions (TD-6, DL-39): class 08, operator intervention 57P01 to 57P03,
-# serialisation failure and deadlock. Accepted risk: a deterministic deadlock caused by a bug
+# Temporary server conditions (TD-6, DL-39, DL-42): class 08, operator intervention 57P01 to
+# 57P03, serialisation failure 40001, deadlock 40P01 and too many connections 53300. Accepted risk: a deterministic deadlock caused by a bug
 # repeats for ever and shows only as WARNING lines with cause=database_unavailable.
-_TEMPORARY_SQLSTATES = frozenset({"57P01", "57P02", "57P03", "40001", "40P01"})
+_TEMPORARY_SQLSTATES = frozenset({"57P01", "57P02", "57P03", "40001", "40P01", "53300"})
 
 
 class MalformedMessage(Exception):

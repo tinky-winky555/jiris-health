@@ -51,6 +51,8 @@ def test_transient_and_unclassified_errors(error: BaseException) -> None:
         # DL-39 (TD-6): no longer counted; were transient in M07 (DL-36)
         pytest.param(_wrapped(asyncpg.DeadlockDetectedError("deadlock")), id="40P01-deadlock"),
         pytest.param(_wrapped(asyncpg.SerializationError("serialisation")), id="40001-serialisation"),
+        # DL-42 (HG-2): too many connections is not counted towards BillingFailed
+        pytest.param(_wrapped(asyncpg.TooManyConnectionsError("too many")), id="53300-too-many-connections"),
     ],
 )
 def test_database_unavailable(error: BaseException) -> None:
