@@ -1,7 +1,8 @@
 """API process entry point: exposes create_app() for uvicorn --factory.
 
-The API never talks to RabbitMQ: /complete only writes the outbox (D19). It
-connects to PostgreSQL as visits_app only (D13); no other URL is read.
+The API never talks to RabbitMQ: /complete only writes the outbox (D19). It opens one
+pool per module role (D13): visits_app for the Visits routes, billing_app for the
+billing records (contract DL-24); it never reads the migration or broker settings.
 """
 
 import logging
@@ -12,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.billing import api as billing_api
 from app.visits import api as visits_api
 
 LOG_HANDLER_NAME = "jiris-app-stderr"
@@ -41,17 +43,22 @@ def _configure_logging() -> None:
 
 def create_app() -> FastAPI:
     visits_url = _required_env("VISITS_DATABASE_URL")
+    billing_url = _required_env("BILLING_DATABASE_URL")
     _configure_logging()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         visits_engine = create_async_engine(visits_url, pool_pre_ping=True)
+        billing_engine = create_async_engine(billing_url, pool_pre_ping=True)
         app.state.visits_sessionmaker = async_sessionmaker(visits_engine, expire_on_commit=False)
+        app.state.billing_sessionmaker = async_sessionmaker(billing_engine, expire_on_commit=False)
         try:
             yield
         finally:
             await visits_engine.dispose()
+            await billing_engine.dispose()
 
     app = FastAPI(title="Jiris Health", lifespan=lifespan)
     app.include_router(visits_api.router)
+    app.include_router(billing_api.router)
     return app
