@@ -22,7 +22,7 @@ from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import ExecWaitStrategy, LogMessageWaitStrategy
 
-from tests.integration.helpers import Stack
+from tests.integration.helpers import Stack, WorkerNotReady
 
 ROOT = Path(__file__).resolve().parents[2]
 POSTGRES_IMAGE = "postgres:18.1-alpine"
@@ -137,7 +137,9 @@ def worker(stack: Stack, tmp_path_factory: pytest.TempPathFactory) -> Iterator[s
             )
             if not ready:
                 process.terminate()
-                pytest.fail(f"worker not ready (exit code {process.poll()}):\n{log_path.read_text()}")
+                raise WorkerNotReady(
+                    f"worker not ready (exit code {process.poll()}):\n{log_path.read_text()}"
+                )
             yield process
         finally:
             process.terminate()

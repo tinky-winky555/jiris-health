@@ -10,6 +10,14 @@ EVENTUAL_TIMEOUT_S = 10.0  # D28
 POLL_INTERVAL_S = 0.1
 
 
+class WorkerNotReady(Exception):
+    """The worker process did not put a consumer on both inbox queues in time.
+
+    T1 expects exactly this error until M06 (contract DL-17); any other error
+    in the worker fixture fails the test.
+    """
+
+
 @dataclass(frozen=True)
 class Stack:
     """Connection settings of the stack started by the integration fixtures."""

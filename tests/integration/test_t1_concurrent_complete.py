@@ -10,15 +10,23 @@ import asyncio
 import asyncpg
 import pytest
 
-from tests.integration.helpers import create_visit, start_visit, wait_for_visit_status
+from tests.integration.helpers import (
+    WorkerNotReady,
+    create_visit,
+    start_visit,
+    wait_for_visit_status,
+)
 
 T1_RUNS = 50
 
 pytestmark = pytest.mark.integration
 
 
-# Contract OQ-2: expected to fail until M06 (Visits consumer); remove the marker there.
-@pytest.mark.xfail(strict=True, reason="needs relay and consumers; removed in M06")
+# Contracts DL-6 and DL-17: expected to fail with WorkerNotReady until M06 (Visits
+# consumer); any other error fails T1. Remove the marker in M06.
+@pytest.mark.xfail(
+    strict=True, raises=WorkerNotReady, reason="needs relay and consumers; removed in M06"
+)
 @pytest.mark.parametrize("run", range(T1_RUNS))
 async def test_t1_concurrent_complete_yields_one_winner_and_one_billing_record(
     run: int,
