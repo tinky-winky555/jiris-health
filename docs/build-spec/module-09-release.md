@@ -70,11 +70,11 @@ post-release record as OQ-31.
 - [x] Contract section 7a is empty and section 7b matches
   `docs/technical-debt.md`.
 - [x] Collected test count is at least 408 plus the new tests.
-- [ ] After HG-3 only: `main` holds the release merge (and the tag, if
+- [x] After HG-3 only: `main` holds the release merge (and the tag, if
   OQ-30 says so) on `origin`.
 
-Completion report: `gate-report-M09-IG-7.md` (the criterion on `main`
-is ticked after HG-3).
+Completion report: `gate-report-M09-IG-7.md`; the criterion on `main`
+ticked from the release record in that report (HG-3, `4b505cf`, `v1.0.0`).
 
 ## 5. Out of scope
 

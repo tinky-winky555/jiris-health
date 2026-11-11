@@ -51,7 +51,7 @@ stand.
 | 3. `lint-imports`, `alembic -n visits check`, `alembic -n billing check` | Met | `uv run lint-imports`: 3 kept; in the suite `test_models_match_migrations` 2 passed; against the stack, `docker compose run --rm migrate alembic -n visits check` and `-n billing check`: "No new upgrade operations detected", exit 0 |
 | 4. `docker compose up` from an empty volume with `.env` filled starts every service; README documents run and test | Met | Fresh clone at `5c2011f`: `cp .env.example .env` and the README script set the six credentials (passwords 32 characters) and left the four URLs empty, as the README says; `.env` ignored, `git status` clean; `docker compose up -d --build` on a new volume: postgres, rabbitmq, api, worker running, migrate exited 0; the README `curl` flow: In Progress, then pending, then Completed, then one record `Created`, `50.00`; the README Alembic block: both checks clean, `visits` downgrade base and upgrade head exit 0; `billing` downgrade base and upgrade head exit 0; `visits_0002 (head)`, `billing_0001 (head)`; `stop worker` exit 0; `down -v`; `.env` deleted. README test 41 passed |
 | 5. Contract §7a empty; §7b matches `docs/technical-debt.md` | Met | §7a open rows: none; §7b and the register: TD-1 to TD-7 all Done, compared by script |
-| 6. `build/increments` merged into `main` under HG-3 | Pending | Separate HG-3 stop after this report is approved and `feature/m09-release` is merged into `build/increments` (DL-44) |
+| 6. `build/increments` merged into `main` under HG-3 | Met (release record below) | `4b505cf` on `main`, tag `v1.0.0` |
 
 Module criteria (module-09 section 4): 3.1.1 passes (41); fresh clone
 following only the README: met (items 2 and 4); items 1 to 5 of section g
@@ -102,3 +102,29 @@ After this report is approved, `feature/m09-release` is merged into
 the commits and files between `main` and `build/increments` and a
 fresh-clone run of `build/increments`, and merges into `main` (DL-44)
 only after the developer's explicit yes.
+
+## Release record (DL-45)
+
+HG-3 given by Sasha on 2026-11-11, with conditions checked in this order:
+
+| Condition | Result |
+|---|---|
+| a. Fresh clone of `build/increments` (`3dbb432`): 449 passed, 0 skipped, 0 xfail or xpass, lint 3 of 3 | Met: 449 passed in 191.5 s, no skipped, xfailed or xpassed test, `Contracts: 3 kept, 0 broken.` |
+| b. No `.env`, password, key, `m03-draft`, scratchpad or `.idea` in `main..build/increments` or in the history | Not met at first: `git log --all -- '*.env' '.env'` empty, no such path ever committed (only `.env.example`), no private key or token; but 63 of 79 commits (`6c707c0` to `64ef30c`) hold the placeholder local passwords removed by TD-1. Stopped and reported; the developer accepted the risk (DL-46, `15ce92f`) |
+| c. Tag `v1.0.0` absent locally and on origin | Met: both empty |
+| d. `main` on origin still `697fa9e` | Met: origin and local `main` at `697fa9e`, an ancestor of `build/increments` |
+
+Release: 78 commits from `main` to `build/increments` before DL-46 (79
+with it); top-level paths changed: `.dockerignore`, `.env.example`,
+`.gitignore`, `.importlinter`, `.python-version`, `alembic.ini`, `app/`
+(26 files), `CLAUDE.md`, `docker/` (2), `docker-compose.yml`,
+`Dockerfile`, `docs/` (31, then 31 with DL-46), `pyproject.toml`,
+`README.md`, `tests/` (38), `uv.lock`.
+
+| Step | Result |
+|---|---|
+| `git merge --no-ff build/increments` into `main` | `4b505cf Release 1.0: Jiris Health, M01 to M09`; the tree of `main` equals the tree of `build/increments` at `15ce92f` |
+| Annotated tag | `v1.0.0`, tag object `ee8c0d4`, on `4b505cf` |
+| Push | `main`: `697fa9e..4b505cf`; `v1.0.0`: new tag on origin |
+| This record | One `docs:` commit on `build/increments` only; `main` keeps the released snapshot |
+

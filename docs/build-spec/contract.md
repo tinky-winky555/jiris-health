@@ -121,7 +121,7 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | Green: 50 of 50 passed; the `xfail` marker was removed in M06 (`e2a1d54`) after a recorded `XPASS(strict)` 50 of 50. No `xfail` remains in the suite. |
-| Test count | 449 collected on `feature/m09-release`, 449 passed (fresh clone), M09 completion. Baseline before M09: 408. |
+| Test count | 449 collected, 449 passed on the release (fresh clone of `build/increments` at `3dbb432`; `15ce92f` changed only the contract). |
 | M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
 | Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
 | M04, outbox relay and topology | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition to close TD-5 first (done, DL-23, `0bf2246`); merged into `build/increments` as `fa5dec6` (`Merge M04 outbox-relay: IG-7 approved`) and pushed. Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
@@ -129,10 +129,11 @@ retrospectively.
 | M06, Visits consumer; T1 green | Complete. IG-7 approved by Sasha on 2026-11-11 with TD-6 recorded (`0087141`); merged into `build/increments` as `0459df5` (`Merge M06 visits-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M06-IG-7.md`: 10 of 10 criteria met; T1, T3, T6 green. |
 | M07, failure paths in Billing | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `64ef30c` (`Merge M07 failure-paths: IG-7 approved`) and pushed. Completion report `gate-report-M07-IG-7.md`: 8 of 8 criteria met; T4, T5 green. T1 to T8 all green. |
 | M08, technical debt and operations | Complete. IG-7 approved by Sasha on 2026-11-11 with 53300 decided (DL-42, `8cc4036`); merged into `build/increments` as `b4e047e` (`Merge M08 operations-delivery: IG-7 approved`) and pushed. Completion report `gate-report-M08-IG-7.md`: 9 of 9 criteria met; no technical debt open. |
-| M09, README, definition of complete, release | Complete on `feature/m09-release` except the merge into `main` (from `build/increments` at `b4e047e`; not merged, not pushed). Completion report `gate-report-M09-IG-7.md`: index section g items 1 to 5 met, item 6 waits for HG-3. |
-| Current module | None open. Delivery complete pending HG-3. |
-| Last approved gate | HG-1 on module-09 and `gate-report-M09-IG-3.md`, 2026-11-11. |
-| Next pending gate | Developer review of `gate-report-M09-IG-7.md`; then HG-3 for the merge into `main`. |
+| M09, README, definition of complete, release | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `3dbb432` (`Merge M09 release: IG-7 approved`). Completion report `gate-report-M09-IG-7.md`. |
+| Release 1.0 | **Released.** HG-3 given by Sasha on 2026-11-11 with conditions a to d, all met (b with the accepted risk DL-46). `build/increments` at `15ce92f` merged into `main` as `4b505cf` (`Release 1.0: Jiris Health, M01 to M09`, `--no-ff`); annotated tag `v1.0.0` (tag object `ee8c0d4`) on `4b505cf`; `main` and `v1.0.0` pushed to origin (`697fa9e..4b505cf`). Index section g: items 1 to 6 met. |
+| Current module | None. Delivery complete. The Evolution Envelope is available by the developer's decision (CLAUDE.md), to be recorded in section 6. |
+| Last approved gate | HG-3, release 1.0 into `main`, 2026-11-11. |
+| Next pending gate | None in this delivery. |
 | Blockers | None. |
 
 ## 6. Decision log
