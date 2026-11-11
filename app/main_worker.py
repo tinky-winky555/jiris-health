@@ -4,7 +4,8 @@ Run with: python -m app.main_worker
 
 The worker declares the RabbitMQ topology, runs the outbox relays of both schemas and
 both consumers, each with its own role and pool (D13, D19); it is ready once both inbox
-queues have a consumer (TDD section 11). The purge job arrives with M08. SIGTERM and SIGINT stop the consumers and
+queues have a consumer (TDD section 11). The outbox purge (R5) runs for both schemas from
+start, before the broker is reached, then hourly. SIGTERM and SIGINT stop the consumers and
 the relays after their running message or pass; the process then exits 0.
 """
 
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from app.billing import consumer as billing_consumer
 from app.visits import consumer as visits_consumer
 
+from app.outbox.purge import OutboxPurge
 from app.outbox.relay import BACKOFF_CEILING_S, POLL_INTERVAL_S, OutboxRelay, backoff_delays
 from app.outbox.topology import declare_topology
 
@@ -35,10 +37,25 @@ def _required_env(name: str) -> str:
     return value
 
 
+FASTSTREAM_LOGGER = "app.faststream"
+
+
 def _configure_logging() -> None:
-    """INFO for the application, WARNING for libraries, one line per record on stderr."""
+    """INFO for the application, WARNING for libraries, one line per record on stderr. FastStream
+    logs through a logger of ours at WARNING, so its per-message INFO lines and its coloured
+    format stay out of the worker log (DL-41)."""
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
     logging.getLogger("app").setLevel(logging.INFO)
+    logging.getLogger(FASTSTREAM_LOGGER).setLevel(logging.WARNING)
+
+
+def build_broker(url: str) -> RabbitBroker:
+    """Publisher confirms are on by default; a returned mandatory message raises (DL-20)."""
+    return RabbitBroker(
+        url,
+        default_channel=Channel(on_return_raises=True),
+        logger=logging.getLogger(FASTSTREAM_LOGGER),
+    )
 
 
 async def _wait(stop: asyncio.Event, seconds: float) -> bool:
@@ -73,8 +90,11 @@ async def run() -> None:
         schema: create_async_engine(_required_env(variable), pool_pre_ping=True)
         for schema, variable in DATABASE_URLS.items()
     }
-    # Publisher confirms are on by default; a returned mandatory message raises (DL-20).
-    broker = RabbitBroker(_required_env("RABBITMQ_URL"), default_channel=Channel(on_return_raises=True))
+    purges = [
+        asyncio.create_task(OutboxPurge(schema=schema, engine=engine).run_forever(stop))
+        for schema, engine in engines.items()
+    ]
+    broker = build_broker(_required_env("RABBITMQ_URL"))
     billing_consumer.register(
         broker, async_sessionmaker(engines["billing"], expire_on_commit=False)
     )
@@ -92,6 +112,8 @@ async def run() -> None:
         ]
         await asyncio.gather(*(relay.run_forever(stop) for relay in relays))
     finally:
+        stop.set()
+        await asyncio.gather(*purges)
         await broker.stop()
         for engine in engines.values():
             await engine.dispose()
