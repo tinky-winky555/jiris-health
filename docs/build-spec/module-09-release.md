@@ -60,18 +60,21 @@ post-release record as OQ-31.
 
 ## 4. Acceptance criteria
 
-- [ ] 3.1.1 passes.
-- [ ] A fresh clone, following only the README, installs, runs the full
+- [x] 3.1.1 passes.
+- [x] A fresh clone, following only the README, installs, runs the full
   suite green (T1 50 of 50, no `xfail`), and brings the stack up from an
   empty volume with every service started and `migrate` exit 0; the
   README's `curl` flow ends Completed with one billing record.
-- [ ] Every item of index section g is met with evidence, except item 6
+- [x] Every item of index section g is met with evidence, except item 6
   (the merge into `main`), which waits for HG-3.
-- [ ] Contract section 7a is empty and section 7b matches
+- [x] Contract section 7a is empty and section 7b matches
   `docs/technical-debt.md`.
-- [ ] Collected test count is at least 408 plus the new tests.
+- [x] Collected test count is at least 408 plus the new tests.
 - [ ] After HG-3 only: `main` holds the release merge (and the tag, if
   OQ-30 says so) on `origin`.
+
+Completion report: `gate-report-M09-IG-7.md` (the criterion on `main`
+is ticked after HG-3).
 
 ## 5. Out of scope
 
