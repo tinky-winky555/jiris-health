@@ -121,17 +121,18 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | Green: 50 of 50 passed; the `xfail` marker was removed in M06 (`e2a1d54`) after a recorded `XPASS(strict)` 50 of 50. No `xfail` remains in the suite. |
-| Test count | 404 collected on `feature/m08-operations-delivery`, 404 passed, M08 completion. Baseline before M08: 353. |
+| Test count | 449 collected on `feature/m09-release`, 449 passed (fresh clone), M09 completion. Baseline before M09: 408. |
 | M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
 | Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
 | M04, outbox relay and topology | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition to close TD-5 first (done, DL-23, `0bf2246`); merged into `build/increments` as `fa5dec6` (`Merge M04 outbox-relay: IG-7 approved`) and pushed. Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
 | M05, Billing consumer, happy path | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition of a generic plan regression test (done, `ab215ad`); merged into `build/increments` as `755a547` (`Merge M05 billing-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M05-IG-7.md`: 8 of 8 criteria met. |
 | M06, Visits consumer; T1 green | Complete. IG-7 approved by Sasha on 2026-11-11 with TD-6 recorded (`0087141`); merged into `build/increments` as `0459df5` (`Merge M06 visits-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M06-IG-7.md`: 10 of 10 criteria met; T1, T3, T6 green. |
 | M07, failure paths in Billing | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `64ef30c` (`Merge M07 failure-paths: IG-7 approved`) and pushed. Completion report `gate-report-M07-IG-7.md`: 8 of 8 criteria met; T4, T5 green. T1 to T8 all green. |
-| M08, technical debt and operations | Complete on `feature/m08-operations-delivery` (from `build/increments` at `64ef30c`; not merged, not pushed). Completion report `gate-report-M08-IG-7.md`: 9 of 9 criteria met; no technical debt open. |
-| Current module | None open. M09 (README, definition of complete, release; 4 hours) is authored after the developer approves the M08 IG-7 report. |
-| Last approved gate | HG-1 on module-08 and `gate-report-M08-IG-3.md`, 2026-11-11. |
-| Next pending gate | BS-3 merge of M08 (IG-7 approved, 53300 decided as DL-42). |
+| M08, technical debt and operations | Complete. IG-7 approved by Sasha on 2026-11-11 with 53300 decided (DL-42, `8cc4036`); merged into `build/increments` as `b4e047e` (`Merge M08 operations-delivery: IG-7 approved`) and pushed. Completion report `gate-report-M08-IG-7.md`: 9 of 9 criteria met; no technical debt open. |
+| M09, README, definition of complete, release | Complete on `feature/m09-release` except the merge into `main` (from `build/increments` at `b4e047e`; not merged, not pushed). Completion report `gate-report-M09-IG-7.md`: index section g items 1 to 5 met, item 6 waits for HG-3. |
+| Current module | None open. Delivery complete pending HG-3. |
+| Last approved gate | HG-1 on module-09 and `gate-report-M09-IG-3.md`, 2026-11-11. |
+| Next pending gate | Developer review of `gate-report-M09-IG-7.md`; then HG-3 for the merge into `main`. |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -184,6 +185,9 @@ repository.
 | DL-40 | 2026-11-11 | TD-2 is part of M08 (OQ-27) | approved by the developer |
 | DL-41 | 2026-11-11 | M08 also delivers a restart policy for `api` and `worker`, FastStream's own log lines at WARNING in the application format, and a `migrate` service that receives only `MIGRATIONS_DATABASE_URL` (OQ-28) | approved by the developer |
 | DL-42 | 2026-11-11 | SQLSTATE 53300 `too_many_connections` is a temporary condition (database unavailable: backoff, not counted), with 08, 57P, 40001 and 40P01; TD-6 and TDD §8.2 list it; held by tests in `test_consumer_mechanics.py` and `test_billing_classify.py`. Recorded as DL-42 because DL-40 was already taken (TD-2) | approved by the developer (HG-2) |
+| DL-43 | 2026-11-11 | Index section g item 4 reads: `docker compose up` from an empty volume, with `.env` filled from `.env.example`, starts every service (OQ-29). DL-42 keeps its number (developer's decision) | approved by the developer |
+| DL-44 | 2026-11-11 | Release under HG-3: `git merge --no-ff build/increments` into `main` with the message `Release 1.0: Jiris Health, M01 to M09`, an annotated tag `v1.0.0` on that merge, then `git push origin main` and `git push origin v1.0.0`; only after the developer's explicit yes at a separate stop (OQ-30) | approved by the developer; execution waits for HG-3 |
+| DL-45 | 2026-11-11 | After the release merge, the record (merge hash, tag, final status) goes into one `docs:` commit on `build/increments` only; `main` keeps the released snapshot (OQ-31) | approved by the developer |
 
 ## 7. Open questions and technical debt
 
@@ -225,6 +229,9 @@ Resolved questions, kept for traceability:
 | OQ-26 | M08, HG-2, TD-6: 08, 57P*, 40001, 40P01 not counted | Yes, with the accepted risk recorded | DL-39 |
 | OQ-27 | M08: include TD-2 | Yes | DL-40 |
 | OQ-28 | M08: restart policy, FastStream log level, reduced `migrate` environment | Yes | DL-41 |
+| OQ-29 | M09: index section g item 4 with a filled `.env` | Yes | DL-43 |
+| OQ-30 | M09: release mechanics under HG-3 | Option A: `git merge --no-ff build/increments` into `main` with `Release 1.0: Jiris Health, M01 to M09`, annotated tag `v1.0.0`, push of `main` and the tag | DL-44 |
+| OQ-31 | M09: post-release record | One `docs:` commit on `build/increments` only | DL-45 |
 
 ### 7b. Technical debt summary
 

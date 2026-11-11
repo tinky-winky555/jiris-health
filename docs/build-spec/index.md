@@ -185,8 +185,9 @@ no em or en dashes; concrete wording.
 2. T1 to T8 (PRD §8) pass; T1 passes 50 of 50 runs; no `xfail` remains.
 3. `lint-imports`, `alembic -n visits check` and `alembic -n billing
    check` pass.
-4. `docker compose up` from an empty volume starts postgres, rabbitmq,
-   migrate (exit 0), api and worker; README documents run and test.
+4. `docker compose up` from an empty volume, with `.env` filled from
+   `.env.example` (DL-38, DL-43), starts postgres, rabbitmq, migrate
+   (exit 0), api and worker; README documents run and test.
 5. Contract section 7a is empty; 7b matches `docs/technical-debt.md`.
 6. `build/increments` merged into `main` under HG-3.
 
