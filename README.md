@@ -87,6 +87,11 @@ chains as `jiris_migrator`), then, once `migrate` has exited 0, `api` and `worke
 listens on `localhost:8000`; PostgreSQL on 5432; RabbitMQ on 5672, with its management UI
 on `localhost:15672` (log in with `RABBITMQ_USER` and `RABBITMQ_PASSWORD` from `.env`).
 
+If a PostgreSQL server already runs on the host and listens on `localhost:5432` (for
+example a Homebrew PostgreSQL on macOS), connections from the host reach that server, not
+the container. The stack is not affected, because its services talk inside the compose
+network; for database commands against the stack, use the `migrate` image (see Test).
+
 A complete flow, from creation to a billing record:
 
 ```sh
@@ -94,11 +99,11 @@ VISIT=$(curl -s -X POST localhost:8000/api/visits -H 'content-type: application/
   -d '{"start_date_time": "2026-11-11T09:00:00Z", "end_date_time": "2026-11-11T11:00:00Z",
        "description": "Morning care visit", "rate": "25.00"}' \
   | python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])')
-curl -s -X POST localhost:8000/api/visits/$VISIT/start      # Scheduled → In Progress
-curl -s -X POST localhost:8000/api/visits/$VISIT/complete   # 202, completion_pending: true
+curl -s -w '\n' -X POST localhost:8000/api/visits/$VISIT/start      # Scheduled → In Progress
+curl -s -w '\n' -X POST localhost:8000/api/visits/$VISIT/complete   # 202, completion_pending: true
 sleep 3
-curl -s localhost:8000/api/visits/$VISIT                    # status Completed
-curl -s "localhost:8000/api/billing-records?visit_id=$VISIT"  # one record, amount "50.00"
+curl -s -w '\n' localhost:8000/api/visits/$VISIT                    # status Completed
+curl -s -w '\n' "localhost:8000/api/billing-records?visit_id=$VISIT"  # one record, amount "50.00"
 ```
 
 ### Endpoints
@@ -137,6 +142,16 @@ uv run alembic -n visits upgrade head
 uv run alembic -n billing upgrade head
 uv run alembic -n visits check
 uv run alembic -n billing check
+```
+
+Against the database of the running stack, run the same commands inside the `migrate`
+image, which already holds `MIGRATIONS_DATABASE_URL` for the compose network:
+
+```sh
+docker compose run --rm migrate alembic -n visits check
+docker compose run --rm migrate alembic -n billing check
+docker compose run --rm migrate alembic -n visits downgrade base    # destructive: test stacks only
+docker compose run --rm migrate alembic -n visits upgrade head
 ```
 
 ## Operations
