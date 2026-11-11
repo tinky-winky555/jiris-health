@@ -13,6 +13,7 @@ import pytest
 
 from tests.integration.helpers import (
     Stack,
+    assert_no_exception_text,
     collect_messages,
     create_visit,
     failing_insert_trigger,
@@ -83,7 +84,11 @@ async def test_t5_counter_survives_a_worker_restart_and_the_fifth_attempt_fails(
                 )
             ]
             assert payload["error_class"] == "transient_exhausted"
-            current = (await client.get(f"/api/visits/{visit['id']}")).json()
+            assert payload["reason"] == "transient_errors_exhausted"  # TD-7
+            raw = await client.get(f"/api/visits/{visit['id']}")
+            assert_no_exception_text(raw.text)
+            current = raw.json()
+            assert current["completion_failure_reason"] == "transient_errors_exhausted"
             assert (current["status"], current["completion_pending"]) == ("Scheduled", False)
             [parked] = await collect_messages(stack.rabbitmq_url, "billing.parking", {attempt})
             assert parked.message_id == attempt

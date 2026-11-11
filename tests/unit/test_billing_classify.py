@@ -33,8 +33,6 @@ def test_permanent_errors(error: BaseException) -> None:
     [
         pytest.param(_wrapped(asyncpg.UniqueViolationError("duplicate")), id="23505-stays-transient"),
         pytest.param(_wrapped(asyncpg.RaiseError("injected")), id="P0001-raise"),
-        pytest.param(_wrapped(asyncpg.DeadlockDetectedError("deadlock")), id="40P01-deadlock"),
-        pytest.param(_wrapped(asyncpg.SerializationError("serialisation")), id="40001-serialisation"),
         pytest.param(RuntimeError("bug"), id="unclassified"),
         pytest.param(ValueError("unexpected"), id="value-error"),
     ],
@@ -50,6 +48,9 @@ def test_transient_and_unclassified_errors(error: BaseException) -> None:
         pytest.param(asyncpg.ConnectionDoesNotExistError("closed"), id="connection-lost"),
         pytest.param(OperationalError("SELECT 1", None, Exception("x")), id="operational"),
         pytest.param(TimeoutError(), id="timeout"),
+        # DL-39 (TD-6): no longer counted; were transient in M07 (DL-36)
+        pytest.param(_wrapped(asyncpg.DeadlockDetectedError("deadlock")), id="40P01-deadlock"),
+        pytest.param(_wrapped(asyncpg.SerializationError("serialisation")), id="40001-serialisation"),
     ],
 )
 def test_database_unavailable(error: BaseException) -> None:

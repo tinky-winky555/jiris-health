@@ -433,3 +433,11 @@ async def stop_worker_process(process, timeout: float = 10.0) -> int:
         process.kill()
         process.wait(timeout)
         raise
+
+
+FORBIDDEN_IN_RESPONSES = ("Error", "sqlalchemy", "asyncpg", "Traceback", "overflow", "injected")
+
+
+def assert_no_exception_text(body: str) -> None:
+    """TD-7: no exception text ever reaches an API response."""
+    assert [word for word in FORBIDDEN_IN_RESPONSES if word in body] == [], body

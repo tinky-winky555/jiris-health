@@ -14,6 +14,7 @@ import pytest
 
 from tests.integration.helpers import (
     Stack,
+    assert_no_exception_text,
     create_visit,
     purge_queues,
     start_visit,
@@ -60,7 +61,13 @@ async def test_t4_permanent_error_resets_the_visit_and_complete_works_again(
             )
         ]
         assert payload["error_class"] == "permanent"
-        assert payload["reason"] == current["completion_failure_reason"]
+        assert payload["reason"] == current["completion_failure_reason"] == "amount_out_of_range"  # TD-7
+        raw = await client.get(f"/api/visits/{visit['id']}")
+        assert_no_exception_text(raw.text)
+        last_error = await billing_db.fetchval(
+            "SELECT last_error FROM billing.inbox WHERE event_id = $1::uuid", attempt
+        )
+        assert "numeric field overflow" in last_error  # the raw text stays in the inbox only
 
         again = await client.post(f"/api/visits/{visit['id']}/complete")
         assert again.status_code == 202, again.text

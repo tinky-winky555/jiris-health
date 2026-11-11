@@ -56,3 +56,34 @@ def test_a_cause_chain_is_followed() -> None:
 )
 def test_other_errors_are_not_database_unavailable(error: BaseException) -> None:
     assert not is_database_unavailable(error)
+
+
+# TD-6 (module-08 task 3.1.7; DL-39): narrowed by SQLSTATE
+
+
+@pytest.mark.parametrize(
+    "orig",
+    [
+        pytest.param(asyncpg.ConnectionFailureError("lost"), id="08006"),
+        pytest.param(asyncpg.AdminShutdownError("shutdown"), id="57P01"),
+        pytest.param(asyncpg.CrashShutdownError("crash"), id="57P02"),
+        pytest.param(asyncpg.CannotConnectNowError("starting"), id="57P03"),
+        pytest.param(asyncpg.SerializationError("serialisation"), id="40001"),
+        pytest.param(asyncpg.DeadlockDetectedError("deadlock"), id="40P01"),
+    ],
+)
+def test_temporary_sqlstates_are_unavailable(orig: BaseException) -> None:
+    assert is_database_unavailable(OperationalError("SELECT 1", None, orig))
+    assert is_database_unavailable(_wrapped(orig))
+
+
+@pytest.mark.parametrize(
+    "orig",
+    [
+        pytest.param(asyncpg.DivisionByZeroError("zero"), id="22012"),
+        pytest.param(asyncpg.InternalServerError("internal"), id="XX000"),
+        pytest.param(asyncpg.RaiseError("raised"), id="P0001"),
+    ],
+)
+def test_operational_error_with_another_sqlstate_is_counted(orig: BaseException) -> None:
+    assert not is_database_unavailable(OperationalError("SELECT 1", None, orig))
