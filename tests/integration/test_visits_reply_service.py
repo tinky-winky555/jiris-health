@@ -2,6 +2,7 @@
 R1, R3, D16, D23, FR6, FR8, FR9; T6; contract DL-29 to DL-31)."""
 
 import asyncio
+import logging
 import uuid
 
 import asyncpg
@@ -173,3 +174,30 @@ async def test_two_replies_at_once_are_serialised(make_client, visits_sessions) 
 
     assert sorted(o.kind for o in outcomes) == ["completed", "noop"]
     assert (await _visit(client, visit_id))["status"] == "Completed"
+
+
+# BillingFailed for a Completed visit: no-op with a WARNING (approved for M06 IG-7; D23)
+
+
+async def test_billing_failed_for_a_completed_visit_is_a_no_op_with_a_warning(
+    make_client, visits_sessions, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = make_client()
+    visit_id, attempt = await pending_visit(client)
+    await _apply(visits_sessions, billing_reply(visit_id, attempt))
+    completed = await _visit(client, visit_id)
+
+    with caplog.at_level(logging.WARNING, logger="app.visits"):
+        outcome = await _apply(visits_sessions, billing_reply(visit_id, attempt, failed=True))
+
+    assert outcome.kind == "noop"
+    assert await _visit(client, visit_id) == completed  # completion_requested_at kept (D23)
+    warnings = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == "app.visits.service"
+    ]
+    assert len(warnings) == 1, warnings
+    assert f"visit_id={visit_id}" in warnings[0]
+    assert f"completion_attempt_id={attempt}" in warnings[0]
+    assert "BillingFailed" in warnings[0]
