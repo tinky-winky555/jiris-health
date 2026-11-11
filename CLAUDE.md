@@ -136,7 +136,8 @@ Package manager: uv (`pyproject.toml`, `uv.lock`, Python pinned in `.python-vers
   (needs `MIGRATIONS_DATABASE_URL` pointing at a database migrated to head;
   the suite runs both checks in `tests/integration/test_migrations.py`
   against testcontainers)
-- Local run: `docker compose up` (migrate runs first, then api and worker)
+- Local run: `docker compose up` (migrate runs first, then api and worker);
+  `.env` must be filled from `.env.example` first (README, Setup)
 If a command here differs from what the repository actually uses, the
 repository wins: correct this section and say so in the next gate report.
 
