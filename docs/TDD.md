@@ -83,6 +83,7 @@ app/
     consumer.py         # handles billing.* events
     migrations/         # Alembic chain for schema "visits"
   billing/
+    api.py              # FastAPI router for GET /api/billing-records (contract DL-24)
     service.py          # amount calculation, record creation, error classification
     models.py           # schema "billing"
     consumer.py         # handles visits.* events
@@ -328,6 +329,8 @@ on message:
 ```
 
 Error classes: transient = database connectivity, timeouts, broker errors; permanent = validation of the payload (for example non-positive duration). Anything else counts as transient (D15).
+
+Interim behaviour of M05 until M07 (approved by Sasha on 2026-11-11, contract DL-25): parsing covers the envelope, its `event_type` (VisitCompleted) and `schema_version` (1), and the validation of the payload; any failure there is rejected without requeue to `billing.parking` at once (R9). Any other exception means ROLLBACK, an ERROR line and `nack` with requeue after 1 s, with no counter; M07 replaces this with the counted transient path, the permanent path and BillingFailed above. The consumer settles every message itself (FastStream `AckPolicy.MANUAL`): the library default, reject on error, would park a VisitCompleted on any exception.
 
 ### 8.3 Connection loss
 

@@ -121,13 +121,13 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | `xfail(strict=True, raises=WorkerNotReady)`, reason "needs relay and consumers; removed in M06" (DL-6, DL-17). 50 of 50 runs reported xfailed, at setup, with `WorkerNotReady`: the worker is not built. |
-| Test count | 217 collected on `feature/m04-outbox-relay` (167 passed, 50 xfailed), M04 completion. Baseline before M04: 187 (181 on `build/increments` at `65bb3f7`, plus the rate precision test). |
+| Test count | 217 collected on `build/increments` at `fa5dec6` (167 passed, 50 xfailed). This is the baseline for M05. |
 | M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
 | Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
-| M04, outbox relay and topology | Complete on `feature/m04-outbox-relay` (from `build/increments` at `65bb3f7`; not merged, not pushed). Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
-| Current module | None open. M05 (Billing consumer, happy path) is authored after the developer approves the M04 IG-7 report. |
-| Last approved gate | HG-1 on module-04 and `gate-report-M04-IG-3.md`, 2026-11-11; IG-7 of M01 and M02, 2026-11-11. |
-| Next pending gate | Developer review of `gate-report-M04-IG-7.md`, then the BS-3 merge. |
+| M04, outbox relay and topology | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition to close TD-5 first (done, DL-23, `0bf2246`); merged into `build/increments` as `fa5dec6` (`Merge M04 outbox-relay: IG-7 approved`) and pushed. Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
+| Current module | M05, Billing consumer, happy path, in progress on `feature/m05-billing-consumer` (from `build/increments` at `fa5dec6`). HG-1 given with the decisions DL-24 to DL-28. |
+| Last approved gate | HG-1 on module-05 and `gate-report-M05-IG-3.md`, 2026-11-11. |
+| Next pending gate | Developer review of `gate-report-M05-IG-7.md`, then the BS-3 merge. |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -161,6 +161,11 @@ repository.
 | DL-21 | 2026-11-11 | Topology declared by the worker through `app/outbox/topology.py`; exchange names and the routing key registry live in `app.contracts`; index section d updated (OQ-13) | approved by the developer |
 | DL-22 | 2026-11-11 | M03 tests check that the visit's outbox row exists, not that it is unpublished, because from M04 a running relay may publish it between the write and the assertion. Refines DL-15 | approved by the developer |
 | DL-23 | 2026-11-11 | `aio-pika>=10.2.3` and `pamqp>=5.0.0` declared as direct dependencies at their locked versions; no locked version changed. Closes TD-5 | approved by the developer (HG-2) |
+| DL-24 | 2026-11-11 | `GET /api/billing-records?visit_id=` is served by the API process through `app/billing/api.py` with a pool as `billing_app` from `BILLING_DATABASE_URL` (D13). The API reads the two module URLs and never `MIGRATIONS_DATABASE_URL` or `RABBITMQ_URL`; the M03 configuration test changes accordingly. TDD §4 and index section d updated (OQ-14) | approved by the developer (HG-2) |
+| DL-25 | 2026-11-11 | TDD §8.2, interim until M07: a body that is not a valid envelope, an envelope of another event type or schema version, and an envelope whose payload fails the validation of its event type are rejected without requeue to `billing.parking` at once (R9); any other exception means ROLLBACK, an ERROR line and `nack` with requeue after 1 s, without a counter. M07 replaces the second rule (OQ-15) | approved by the developer (HG-2) |
+| DL-26 | 2026-11-11 | M05 adds only BillingRecordCreated to `app.contracts`; BillingFailed comes with M06 or M07 (OQ-16) | approved by the developer |
+| DL-27 | 2026-11-11 | Clean test state: the M04 tests that publish or read messages purge `billing.inbox`, `visits.inbox` and both parking queues of the session broker after each test; every fixture that starts a worker purges `billing.inbox` and `visits.inbox` first | approved by the developer |
+| DL-28 | 2026-11-11 | Carried into the M06 plan: tests that read queues directly run isolated from the long-lived worker, on a dedicated vhost or broker or with the worker stopped for the test | approved by the developer |
 
 ## 7. Open questions and technical debt
 
@@ -187,6 +192,9 @@ Resolved questions, kept for traceability:
 | OQ-11 | M04: when to increment `attempts` | Only for an unknown event type; never for broker unavailability or an unroutable message | DL-19, DL-20 |
 | OQ-12 | M04: `mandatory=True` with `on_return_raises=True` | Yes; an unroutable message is handled as a temporary failure with an ERROR log, the row is not excluded | DL-20 |
 | OQ-13 | M04: `app/outbox/topology.py`; exchange names and routing keys in `app.contracts` | Yes | DL-21 |
+| OQ-14 | M05: `GET /api/billing-records` in the API process with a `billing_app` pool | Yes | DL-24 |
+| OQ-15 | M05: interim failure behaviour until M07 | (a) extended: a malformed envelope and a payload that fails its event type's validation go to `billing.parking` at once (R9); (b) yes, until M07 | DL-25 |
+| OQ-16 | M05: only BillingRecordCreated in `app.contracts` | Yes | DL-26 |
 
 ### 7b. Technical debt summary
 
