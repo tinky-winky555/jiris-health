@@ -6,6 +6,7 @@ DML only on its own schema, and import-linter keeps the code boundary.
 
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import asyncpg
@@ -55,6 +56,75 @@ async def test_t7_role_reads_own_schema(stack: Stack, module: str, tables: tuple
     try:
         for table in tables:
             await conn.fetch(f"SELECT 1 FROM {table} LIMIT 1")
+    finally:
+        await conn.close()
+
+
+OWN_TABLE_ROWS = {
+    "visits": [
+        (
+            "visits.visit",
+            "INSERT INTO visits.visit (id, start_date_time, end_date_time, description, rate, status)"
+            " VALUES ($1, now(), now() + interval '1 hour', 'T7', 10.00, 'Scheduled')",
+            "UPDATE visits.visit SET description = 'T7 updated' WHERE id = $1",
+            "DELETE FROM visits.visit WHERE id = $1",
+        ),
+        (
+            "visits.outbox",
+            "INSERT INTO visits.outbox (event_id, event_type, schema_version, payload, occurred_at)"
+            " VALUES ($1, 'T7', 1, '{}'::jsonb, now())",
+            "UPDATE visits.outbox SET published_at = now() WHERE event_id = $1",
+            "DELETE FROM visits.outbox WHERE event_id = $1",
+        ),
+        (
+            "visits.inbox",
+            "INSERT INTO visits.inbox (event_id, event_type) VALUES ($1, 'T7')",
+            "UPDATE visits.inbox SET event_type = 'T7 updated' WHERE event_id = $1",
+            "DELETE FROM visits.inbox WHERE event_id = $1",
+        ),
+    ],
+    "billing": [
+        (
+            "billing.billing_record",
+            "INSERT INTO billing.billing_record (id, visit_id, amount, status)"
+            " VALUES ($1, $1, 10.00, 'Created')",
+            "UPDATE billing.billing_record SET status = 'Reversed' WHERE id = $1",
+            "DELETE FROM billing.billing_record WHERE id = $1",
+        ),
+        (
+            "billing.outbox",
+            "INSERT INTO billing.outbox (event_id, event_type, schema_version, payload, occurred_at)"
+            " VALUES ($1, 'T7', 1, '{}'::jsonb, now())",
+            "UPDATE billing.outbox SET published_at = now() WHERE event_id = $1",
+            "DELETE FROM billing.outbox WHERE event_id = $1",
+        ),
+        (
+            "billing.inbox",
+            "INSERT INTO billing.inbox (event_id, event_type) VALUES ($1, 'T7')",
+            "UPDATE billing.inbox SET attempts = attempts + 1 WHERE event_id = $1",
+            "DELETE FROM billing.inbox WHERE event_id = $1",
+        ),
+    ],
+}
+
+
+@pytest.mark.parametrize("module", ["visits", "billing"])
+async def test_t7_role_writes_own_schema(stack: Stack, module: str) -> None:
+    """The role holds INSERT, UPDATE and DELETE on each of its own tables.
+    Runs in a transaction that is rolled back, so no other test sees the rows.
+    """
+    conn = await asyncpg.connect(_dsn(stack, module))
+    try:
+        transaction = conn.transaction()
+        await transaction.start()
+        try:
+            for table, insert, update, delete in OWN_TABLE_ROWS[module]:
+                row_id = uuid.uuid4()
+                assert await conn.execute(insert, row_id) == "INSERT 0 1", table
+                assert await conn.execute(update, row_id) == "UPDATE 1", table
+                assert await conn.execute(delete, row_id) == "DELETE 1", table
+        finally:
+            await transaction.rollback()
     finally:
         await conn.close()
 

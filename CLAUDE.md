@@ -1,57 +1,204 @@
-# CLAUDE.md · Jiris Health
+# CLAUDE.md, Jiris Health (repository root)
 
-Modular monolith (FastAPI + PostgreSQL + RabbitMQ) with two modules, Visits and Billing. Every completed visit gets exactly one active billing record, even when the broker is down, events arrive twice, or two `/complete` requests race.
+This file is read by the coding agent (Claude Code) before any task in this repository. It defines the Execution Safety Envelope, the system in short, the invariants, the stack and the definition of done. Detailed procedures live in the documents it references; this file stays operational.
 
-## Sources of truth (read before any change)
+================================================================
+EXECUTION SAFETY ENVELOPE, PROJECT OPERATING DEFAULT
+================================================================
+Jiris Health is a greenfield build. All non-trivial work runs under the
+FULL ENVELOPE, executed under the Build Spec in `docs/build-spec/`. The
+Build Spec is the roadmap, checklist, sequence and instruction set; do
+not create parallel roadmap, checklist, contract, index or gate
+artefacts.
 
-1. `docs/PRD.md`: what to build (FR, NFR, acceptance tests T1 to T8).
-2. `docs/TDD.md`: how to build it (architecture, schema, algorithms, contract, configuration).
-3. `docs/HANDOFF.md`: every decision (D1 to D30, R1 to R9) with its rationale.
+THE THREE MODES
+Every task is classified before implementation starts.
 
-Decisions are closed. Do not change one silently. If the code needs a deviation, stop, explain it in one paragraph, and ask. Anything not covered by the documents: propose, mark it `[PROPOSAL]`, and wait for approval.
+Fast Path: only small, low-risk, localised changes with no meaningful
+functional impact: documentation-only updates; wording, comments or
+naming corrections; localised refactors with no behaviour change;
+narrow bug fixes with low blast radius and no architectural impact.
+Fast Path is NOT allowed for: new features, module work, API, schema,
+role, migration, queue, topology, compose or dependency changes, any
+change with unclear scope.
 
-## Invariants (never break)
+Full Envelope: the default here. Module by module under the approved
+Build Spec, each module with its gate-report pair
+(`gate-report-MNN-IG-3.md` before code, `gate-report-MNN-IG-7.md` at
+completion).
 
-- Visits and Billing never read or write each other's tables. They talk only through events in `app.contracts`. `app.visits` and `app.billing` never import each other (import-linter).
-- State change and its event are written in one local transaction (outbox). Nothing publishes to RabbitMQ outside the relay.
-- Consumers de-duplicate by `event_id` in their inbox and ack only after COMMIT.
-- One active record per visit: partial unique index `(visit_id) WHERE status = 'Created'`.
-- `/complete` uses the conditional UPDATE in TDD §6.2. The winner gets 202, everyone else 409.
-- Visits applies a Billing reply only when `completion_attempt_id` matches.
-- Money is `Decimal`, 2 places, ROUND_HALF_UP; it travels in events as a decimal string.
+Evolution Envelope: not active. It becomes available only after the
+delivery is complete (index section g) and only by the developer's
+decision, recorded in contract section 6.
 
-## Way of working
+If the mode is unclear: Full Envelope.
 
-- Test first. Write the acceptance test from PRD §8 before the code that makes it pass. Start with T1.
-- Small increments, in this order: scaffolding and compose → schemas, roles, migrations → `/complete` and outbox → relay → Billing consumer → Visits consumer → failure paths → purge job.
-- After each increment run the full test suite and import-linter. Do not move on while anything is red.
-- Integration tests use real PostgreSQL and RabbitMQ (testcontainers), never mocks of them.
-- Keep the docs in step: if behaviour changes with approval, update `docs/TDD.md` in the same change.
+INTERNAL GATES (owned by the agent; reported in the gate-report pair)
+IG-1 scope and affected surfaces identified · IG-2 dependencies, risks,
+assumptions identified · IG-3 execution sequence is clear · IG-4
+implementation consistent with approved scope · IG-5 validation
+completed for the affected area · IG-6 documentation updated where
+materially required · IG-7 residual risks and follow-ups reported.
 
-## Stack
+HUMAN GATES (owned by the developer; the agent stops and waits)
+HG-1 approval of the contract, then of each module document and its
+IG-3 report before code · HG-2 architecture or trade-off decisions with
+lasting impact, any deviation from TDD · HG-3 merge into `main`, history
+rewrite, destructive database action outside a test container · HG-4
+material scope expansion during implementation.
+Do not stop only for ceremony.
 
-Python 3.15.2 or later · FastAPI · SQLAlchemy 2 async + asyncpg · Alembic (two chains: `visits`, `billing`) · FastStream over aio-pika · Pydantic · pytest, httpx, testcontainers · import-linter · docker-compose (postgres, rabbitmq, api, worker).
+ESCALATION RULE
+If a Fast Path task reveals hidden scope, cross-module impact, contract
+changes or non-trivial risk: pause, summarise what was discovered,
+escalate to the Full Envelope. Silent escalation is not permitted.
 
-First task: check that the compiled dependencies (asyncpg, pydantic-core) install on Python 3.15. If not, report before choosing a workaround.
+ROUTING RULES DURING EXECUTION
+- Need an answer from the developer to proceed: add it to contract
+  section 7a (Open questions) and pause.
+- Took a conscious decision that leaves something suboptimal: entry in
+  `docs/technical-debt.md`, mirrored in contract section 7b.
+- Identified something desirable but out of scope: entry in
+  `docs/feature-backlog.md`, no contract update.
 
-## Configuration
+================================================================
+SOURCE OF TRUTH HIERARCHY (Path B)
+================================================================
+docs/TDD.md > docs/PRD.md > the current Build Spec module > the Build
+Spec index. `docs/HANDOFF.md` holds the rationale of every decision
+(D1 to D30, R1 to R9); read it when a decision looks wrong before
+proposing to change it. Escalate on conflict (contract section 7a); do
+not silently pick one.
 
-`VISITS_DATABASE_URL`, `BILLING_DATABASE_URL`, `MIGRATIONS_DATABASE_URL`, `RABBITMQ_URL`. Relay: poll 500 ms, batch 100, backoff ceiling 30 s. Outbox retention 7 days. Billing transient retries: 5.
+================================================================
+THE SYSTEM (condensed; full design in docs/TDD.md)
+================================================================
+A modular monolith, two processes on one codebase:
+- API process (FastAPI): Visits HTTP API. `POST /api/visits/{id}/complete`
+  validates the status, sets `completion_requested_at` and writes
+  VisitCompleted to `visits.outbox` in ONE transaction, answers 202.
+  Never calls Billing.
+- Worker process: two outbox relays (visits, billing), two consumers
+  (Billing on `billing.inbox`, Visits on `visits.inbox`), the outbox
+  purge job.
+- PostgreSQL: one database, schemas `visits` and `billing`, one role per
+  module (`visits_app`, `billing_app`), migrations by `jiris_migrator`.
+- RabbitMQ: topic exchange `jiris.events`, queues `billing.inbox` and
+  `visits.inbox`, dead-letter exchange `jiris.dlx` with parking queues.
+Flow: VisitCompleted → Billing creates the record and replies
+BillingRecordCreated or BillingFailed → Visits sets Completed or resets.
+Delivery is at-least-once: every consumer is idempotent.
 
-## Commands
+================================================================
+ARCHITECTURE INVARIANTS (do not break)
+================================================================
+- Build in modules: implement only the current module; never close a
+  seam a later module needs.
+- Events, not calls: Visits and Billing never read or write each other's
+  tables and never import each other; they share only `app.contracts`.
+  Enforced by database grants and import-linter.
+- Outbox: a state change and its event are written in one local
+  transaction. Nothing publishes to RabbitMQ except the relay.
+- Inbox: consumers de-duplicate by `event_id` and ack only after COMMIT.
+- One active billing record per visit: partial unique index
+  `(visit_id) WHERE status = 'Created'`.
+- `/complete` serialises through the conditional UPDATE of TDD §6.2;
+  the winner gets 202, everyone else 409.
+- Visits applies a Billing reply only when `completion_attempt_id`
+  matches the current attempt.
+- Money is Decimal, 2 places, ROUND_HALF_UP; in events a decimal string.
 
+================================================================
+REPOSITORY LAYOUT
+================================================================
+See TDD §4 and index section d. In short: `app/{contracts,visits,
+billing,outbox}`, `app/main_api.py`, `app/main_worker.py`, `tests/`,
+`docker/`, `docs/` (PRD, TDD, HANDOFF, registers, build-spec/).
+
+================================================================
+STACK AND CONVENTIONS
+================================================================
+Python 3.15.2 or later, managed by uv. FastAPI, SQLAlchemy 2 async +
+asyncpg, Alembic (two chains), FastStream over aio-pika, Pydantic v2.
+pytest, httpx, testcontainers. import-linter. docker-compose (postgres,
+rabbitmq, migrate, api, worker). Conventions: index section e.
+
+================================================================
+COMMANDS
+================================================================
 Package manager: uv (`pyproject.toml`, `uv.lock`, Python pinned in `.python-version`).
 
 - Install: `uv sync`
-- Run locally: `docker compose up`
-- Tests: `uv run pytest`
+- Tests: `uv run pytest` (T1 only: `uv run pytest tests/integration/test_t1_concurrent_complete.py`)
 - Boundaries: `uv run lint-imports`
 - Migrations: `uv run alembic -n visits upgrade head`, `uv run alembic -n billing upgrade head`
+- Drift check: `uv run alembic -n visits check`, `uv run alembic -n billing check`
+  (needs `MIGRATIONS_DATABASE_URL` pointing at a database migrated to head;
+  the suite runs both checks in `tests/integration/test_migrations.py`
+  against testcontainers)
+- Local run: `docker compose up` (migrate runs first, then api and worker)
+If a command here differs from what the repository actually uses, the
+repository wins: correct this section and say so in the next gate report.
 
-## Definition of done
+================================================================
+DATABASE AND MIGRATIONS (never bend)
+================================================================
+- Migrations run only as `jiris_migrator` (`MIGRATIONS_DATABASE_URL`),
+  via the `migrate` compose service or a test fixture; never from the
+  application roles.
+- Application roles hold DML on their own module's tables only; no DDL,
+  no access to `alembic_version` (contract section 6, DL-1).
+- `alembic -n <chain> check` must stay clean: models and migrations
+  never diverge.
 
-T1 to T8 green (T1 run 50 times), import-linter green, migrations apply from empty, `docker compose up` starts all four services, README explains how to run and test.
+================================================================
+TESTING (test-driven)
+================================================================
+Test first: write the failing test from PRD §8 or the module's
+acceptance criteria, then the code. Integration tests use real
+PostgreSQL and RabbitMQ in testcontainers, never mocks of them. Every
+consumer has the idempotency test: a repeated message changes nothing.
+A test that cannot pass until a later module is marked
+`xfail(strict=True)` with the module that will close it (contract 7a,
+OQ-2).
 
-## Writing
+================================================================
+SECRETS AND CONFIG
+================================================================
+No hardcoded secrets. Env vars: `VISITS_DATABASE_URL`,
+`BILLING_DATABASE_URL`, `MIGRATIONS_DATABASE_URL`, `RABBITMQ_URL`.
+Never commit `.env`; `.env.example` holds keys only.
 
-Code, comments, commits and docs in British English. No em dash or en dash.
+================================================================
+GIT
+================================================================
+See index section e (Git) and contract BS-3. Commits authored as
+`gunsareloaded@proton.me`; check `git config user.email` before the
+first commit of a session. Commit messages in English, imperative mood,
+no Claude attribution lines. Never push to `main` without HG-3; never
+force-push; never rewrite published history.
+
+================================================================
+DEFINITION OF DONE (for any module)
+================================================================
+1. The module's binary acceptance criteria pass from a clean clone.
+2. The full test suite passes (xfail entries only as listed in the
+   module); `lint-imports` passes; `alembic -n visits check` and
+   `alembic -n billing check` pass.
+3. No invariant above is violated; out of scope items were not built.
+4. Documentation materially affected is updated (IG-6).
+5. Contract section 5 is updated; the IG-7 report exists.
+6. After every commit, verify the branch and the test count, not only
+   that the run is green: `git branch --show-current` must be the
+   module's branch, and the collected total must be at least the
+   previous total. A suite that shrinks passes silently.
+
+================================================================
+WRITING
+================================================================
+- Chat with the developer (Sasha) in Russian.
+- Every artefact (code, comments, commits, docs, gate reports, register
+  entries) in British corporate English.
+- No em dashes or en dashes anywhere; use commas, semicolons,
+  parentheses or full stops. Be concrete; never "appropriate", "as
+  needed", "standard", "best practice".

@@ -1,0 +1,175 @@
+# Build Spec Contract, Jiris Health
+
+The developer's operating panel and the first gate of the Build Spec.
+Input path B: `docs/PRD.md` and `docs/TDD.md`; rationale in
+`docs/HANDOFF.md`. Release boundary: the delivery defined in PRD §5 and
+index section g. Executor: the Claude Code agent in this repository, one
+module per session, Full Envelope.
+
+Sections 1 to 4 are LOCKED after developer approval; changes require
+explicit approval and a decision log entry (section 6). Sections 5 to 7
+are LIVE and are maintained by the agent.
+
+## 1. Architecture decisions
+
+Inherited decisions cite their Handoff IDs (D-nn, R-n). Decisions
+ratified with this contract carry BS-nn IDs.
+
+| ID | Decision | Affected |
+|---|---|---|
+| D1 | Modular monolith on FastAPI + PostgreSQL; modules Visits and Billing | all |
+| D5, D13 | No cross-module table access; schema and role per module (`visits_app`, `billing_app`); import-linter | all, db |
+| D6 | Completed visit always gets a record; never two; unpublished events published later without manual action | all |
+| D8 | RabbitMQ: durable queues, manual ack, publisher confirms, DLX | outbox, consumers |
+| D9, D14, D18 | Two-phase completion: `/complete` sets `completion_requested_at`, status unchanged; Completed only after BillingRecordCreated | visits |
+| D10 | `/complete` allowed from Scheduled and In Progress | visits |
+| D11 | Billing computes `amount = rate × hours(end − start)`, Decimal, 2 places, ROUND_HALF_UP | billing |
+| D12 | `Reversed` in the model only; no reversal operation | billing |
+| D15 | Transient errors retried up to 5 times (counter in `billing.inbox`); permanent errors fail at once; unclassified count as transient | billing |
+| D16 | On BillingFailed: reset `completion_requested_at`, store `completion_failure_reason` | visits |
+| D17 | `/complete`: 202 winner; 409 pending, lost race or invalid status; 404 unknown | visits |
+| D19, D25 | Polling relay with `FOR UPDATE SKIP LOCKED` in a separate worker; 500 ms, 100 rows, backoff ceiling 30 s; retention 7 days | outbox, worker |
+| D20, D27 | Event envelope and topology as TDD §7; schemas in `app.contracts` | contracts, all |
+| D23 | `completion_requested_at` kept after Completed | visits |
+| D26, D29 | Two Alembic chains run by `jiris_migrator`; app roles DML only | db |
+| D28 | Supporting endpoints, layout, stack defaults as TDD §3, §4, §6.1 | all |
+| D30 | FastStream over aio-pika with its FastAPI integration | consumers, worker |
+| R1 to R9 | Derived requirements as Handoff §10a, §10b | all |
+| BS-1 | Governance: Full Envelope under this Build Spec; gate-report pair per module | delivery |
+| BS-2 | Module size for this delivery: 4 to 12 hours (the generic 12 to 24 does not fit a two-module service) | delivery |
+| BS-3 | Git: `main` holds released work only; `build/increments` is the integration branch; one branch `feature/mNN-<slug>` per module, created from `build/increments`. No pull requests in this delivery. After the developer approves the module's IG-7 report, the agent merges the feature branch locally into `build/increments` with `git merge --no-ff` and the message `Merge MNN <slug>: IG-7 approved`, then runs `git push`. `build/increments` into `main` under HG-3 at delivery. M01 and M02 were committed directly on `build/increments` before this contract; their history is kept as it is (DL-7) | delivery |
+| BS-4 | `migrate` is a one-shot compose service; `api` and `worker` depend on it with `condition: service_completed_successfully` | compose |
+
+## 2. Stack
+
+No deviation without developer approval and a decision log entry in
+section 6.
+
+| Concern | Choice |
+|---|---|
+| Language | Python 3.15.2 or later, async everywhere, full type hints |
+| Package manager | uv (`pyproject.toml`, `uv.lock`, `.python-version`) |
+| API framework | FastAPI with uvicorn, uvloop and httptools (not `uvicorn[standard]`: pyyaml has no cp315 wheel) |
+| Validation | Pydantic v2 |
+| Database | PostgreSQL in Docker (compose and testcontainers) |
+| ORM | SQLAlchemy 2 async with asyncpg; URLs `postgresql+asyncpg://` |
+| Migrations | Alembic, one `alembic.ini` with sections `[visits]` and `[billing]`, version tables in their own schemas |
+| Messaging | RabbitMQ; FastStream over aio-pika |
+| Boundaries | import-linter (`.importlinter`, three contracts) |
+| Tests | pytest with pytest-asyncio (`asyncio_mode = auto`, session event loop), httpx AsyncClient, testcontainers |
+| Local run | docker-compose: postgres, rabbitmq, migrate, api, worker |
+| Containers | One Dockerfile, image `python:3.15.2-slim`, no `CMD` or `ENTRYPOINT` in the image; compose sets three commands on it: `migrate` (both Alembic chains), `api` (`uvicorn --factory app.main_api:create_app`), `worker` (`python -m app.main_worker`) |
+| Hosting, CI/CD | None in this delivery (local only); see index section h |
+
+## 3. Cross-cutting patterns
+
+| Pattern | Rule |
+|---|---|
+| Error shape | 409 body `{"reason": "completion_pending" \| "invalid_status"}`; 404 empty; 422 FastAPI validation body |
+| Response codes | Create 201 with the visit; `/start`, `/cancel`, `/missed` 200 with the visit; `/complete` 202 with the visit; list endpoints return a JSON array; no pagination |
+| Transactions | One transaction per HTTP command and per consumed message; state change and outbox row in the same transaction |
+| Idempotency | Inbox insert `ON CONFLICT (event_id) DO NOTHING` first; processed → ack without effect; `message_id` = `event_id` |
+| Concurrency | Conditional UPDATE for `/complete`; `SELECT ... FOR UPDATE` on the visit in the Visits consumer; `SKIP LOCKED` in relays |
+| Retries | Relay: unlimited, exponential backoff to 30 s. Billing: 5 attempts for transient or unclassified errors, counted in `billing.inbox`; permanent errors none |
+| Dead letters | Malformed messages and exhausted retries go to the module's parking queue through `jiris.dlx`; never requeued automatically |
+| Reconnection | aio-pika robust connections under FastStream (R7) |
+| Money | Decimal, numeric(12,2), ROUND_HALF_UP; decimal string in events |
+| Time | timestamptz everywhere; UTC in events (`occurred_at`) |
+| Secret management | Env vars only; `.env` never committed; `.env.example` keys only. Local development credentials in `docker-compose.yml`, `docker/postgres/init.sql` and the test fixtures are a recorded compromise (TD-1) |
+| Logging | One line per command and per consumed event with `visit_id`, `event_id`, `event_type`, outcome; no payload bodies |
+| Writing | British corporate English in artefacts; Russian in chat; no em or en dashes |
+
+## 4. Gate map
+
+Internal gate reports live in `docs/build-spec/`. Consecutive internal
+gates of one module are combined into two files: the planning report
+`gate-report-MNN-IG-3.md` (IG-1, IG-2, IG-3, before implementation) and
+the completion report `gate-report-MNN-IG-7.md` (IG-4 to IG-7, when the
+acceptance criteria pass). Human gates produce no file; their outcome is
+recorded in section 5 and, where the entry rule applies, in section 6.
+
+The acceptance checkboxes of a module document are a reading of its
+completion report, not a second record. A box is ticked when the IG-7
+report records the criterion as met.
+
+| Gate | Trigger | Expected report |
+|---|---|---|
+| IG-1 | Start of every module: scope and affected surfaces | gate-report-MNN-IG-3.md |
+| IG-2 | Start of every module: dependencies, risks, assumptions, edge cases | gate-report-MNN-IG-3.md |
+| IG-3 | Start of every module: execution sequence, tests written first | gate-report-MNN-IG-3.md |
+| IG-4 | End of every module: implementation consistent with approved scope | gate-report-MNN-IG-7.md |
+| IG-5 | End of every module: acceptance criteria, full suite, lint-imports, alembic check | gate-report-MNN-IG-7.md |
+| IG-6 | End of every module: affected documentation updated | gate-report-MNN-IG-7.md |
+| IG-7 | End of every module: residual risks, follow-ups, registers | gate-report-MNN-IG-7.md |
+| HG-1 | This contract; the index; each module document with its IG-3 report, before code | none (section 5) |
+| HG-2 | Any change to sections 1 to 4; any deviation from TDD; any design choice with lasting impact | none (section 6) |
+| HG-3 | Merge of `build/increments` into `main`; any history rewrite; any destructive action on a database outside a test container | none (section 5) |
+| HG-4 | Material scope expansion mid-module (new table, endpoint, event, dependency, cross-module impact) | none (section 6 when it changes the contract) |
+
+M01 and M02 were built before this contract. They receive a completion
+report only (`gate-report-M01-IG-7.md`, `gate-report-M02-IG-7.md`), written
+from the repository as it stands; no planning report is written
+retrospectively.
+
+
+## 5. Current status
+
+| Field | Value |
+|---|---|
+| Contract | **Approved (HG-1) by Sasha on 2026-11-11**, with the adoption corrections of DL-9. Sections 1 to 4 are locked. |
+| Index | Approved (HG-1) by Sasha on 2026-11-11, with the adoption corrections of DL-9. |
+| M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. Awaiting the developer's review of the report. |
+| M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. Awaiting the developer's review of the report. |
+| T1 | `xfail(strict=True)`, reason "needs relay and consumers; removed in M06" (DL-6). 50 of 50 runs reported xfailed, at setup: the worker fixture is not ready because the worker is not built. |
+| Test count | 73 collected: 23 passed, 50 xfailed (adoption commit on `build/increments`). This is the baseline for M03. |
+| Current module | M03, Visits API, completion endpoint and outbox write. Branch `feature/m03-visits-api-and-outbox` created from `build/increments`. The pre-contract M03 draft is parked as a patch outside the repository (DL-8). Planning report `gate-report-M03-IG-3.md`: written on the feature branch, uncommitted until HG-1. |
+| Last approved gate | HG-1 on this contract and the index, 2026-11-11. |
+| Next pending gate | HG-1 on module-03 and `gate-report-M03-IG-3.md`. |
+| Blockers | None. |
+
+## 6. Decision log
+
+Decisions taken during build before this contract, and decisions taken at
+its adoption, recorded so the contract starts consistent with the
+repository.
+
+| ID | Date | Decision | State |
+|---|---|---|---|
+| DL-1 | 2026-11-11 | TDD §9 amended: grants on the module's named tables plus `ALTER DEFAULT PRIVILEGES` instead of `ON ALL TABLES`, so application roles have no access to `alembic_version` (D29). Held permanently by T7. Detail in TDD §9 and §9.1 | approved by the developer (HG-2, OQ-1) |
+| DL-2 | 2026-11-11 | API contract details in TDD §6.1: 201 on create, 200 with body on `/start`, `/cancel`, `/missed`, arrays on lists | approved by the developer |
+| DL-3 | 2026-11-11 | `migrate` one-shot compose service (BS-4); `jiris_migrator`; `postgresql+asyncpg://`; worker readiness = a consumer on both `*.inbox` queues | approved by the developer |
+| DL-4 | 2026-11-11 | `uvicorn` without `[standard]`, with `uvloop` and `httptools` (pyyaml has no cp315 wheel) | approved by the developer |
+| DL-5 | 2026-11-11 | `/tests` removed from `.gitignore`; `.import_linter_cache/` added | approved by the developer |
+| DL-6 | 2026-11-11 | T1 is marked `xfail(strict=True)` with reason "needs relay and consumers; removed in M06"; the marker is removed in M06, where T1 must pass 50 of 50 runs (OQ-2) | approved by the developer |
+| DL-7 | 2026-11-11 | BS-3 without pull requests: after an approved IG-7, local `git merge --no-ff` of the feature branch into `build/increments` with the message `Merge MNN <slug>: IG-7 approved`, then `git push`. M01 and M02 history on `build/increments` is kept as it is (OQ-3) | approved by the developer |
+| DL-8 | 2026-11-11 | The M03 draft written before the contract is removed from the working tree and kept as a patch outside the repository. After HG-1 on module-03, the tests are committed first and their red run is recorded, then the code, aligned with the IG-3 report (OQ-4) | approved by the developer |
+| DL-9 | 2026-11-11 | Adoption corrections 1 to 20 of the reconciliation: contract §2 Containers and Tests rows, §3 Secret management and Writing rows, BS-3; index sections c, d and e (init.sql description, index naming as built, `build:` commit prefix, `completion_attempt_id` in the visit body); module-01 task 3.7 and the T1 criterion; module-02 T7 write case; TDD §9 block replaced by the as-built grants; CLAUDE.md commands; `.env.example`; TD-1 and TD-2 | approved by the developer (HG-1) |
+| DL-10 | 2026-11-11 | 404 responses keep the FastAPI body `{"detail": "Not Found"}`; TDD §6.3 and contract §3 are updated in M03 (IG-6) | approved by the developer (HG-2); applied in M03 |
+| DL-11 | 2026-11-11 | `/start` on a visit with a pending completion returns 409 `completion_pending`, like `/cancel` and `/missed` (extends R2); TDD §6 updated in M03 | approved by the developer (HG-2); applied in M03 |
+| DL-12 | 2026-11-11 | Visit creation also returns 422 for a `rate` with more than 2 decimal places and for unknown fields (extends FR11); TDD §6.1 updated in M03 | approved by the developer (HG-2); applied in M03 |
+
+## 7. Open questions and technical debt
+
+### 7a. Open questions (blocking)
+
+| ID | Question | Agent's recommendation |
+|---|---|---|
+| (none) | | |
+
+Resolved questions, kept for traceability:
+
+| ID | Question | Answer | Recorded as |
+|---|---|---|---|
+| OQ-1 | Approve DL-1 (per-table grants and default privileges instead of `ON ALL TABLES`)? | Approved; the `alembic_version` check in T7 stays permanently | DL-1 |
+| OQ-2 | Red T1 until M06, or `xfail(strict=True)`? | `xfail(strict=True)`, reason names M06 | DL-6 |
+| OQ-3 | Approve BS-3? | Approved without pull requests: local `git merge --no-ff` with `Merge MNN <slug>: IG-7 approved`, then `git push` | DL-7, BS-3 |
+| OQ-4 | What to do with the M03 draft written before the contract? | Patch outside the repository, clean working tree, tests first after HG-1 on module-03 | DL-8 |
+
+### 7b. Technical debt summary
+
+Mirrors open entries in `docs/technical-debt.md`.
+
+| ID | Title | State |
+|---|---|---|
+| TD-1 | Local development credentials written in compose, init.sql and test fixtures | Open |
+| TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Open |

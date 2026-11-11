@@ -323,14 +323,22 @@ Relays and consumers reconnect automatically with exponential backoff (R7); prov
 
 ## 9. Module isolation (D5, D13)
 
+As built (amended under contract DL-1, approved by Sasha on 2026-11-11; detail in section 9.1):
+
 ```sql
-CREATE SCHEMA visits; CREATE SCHEMA billing;
-CREATE ROLE visits_app LOGIN; CREATE ROLE billing_app LOGIN;
-GRANT USAGE ON SCHEMA visits TO visits_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA visits TO visits_app;
-GRANT USAGE ON SCHEMA billing TO billing_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA billing TO billing_app;
+-- Cluster bootstrap: docker/postgres/init.sql, run once by the superuser
+CREATE ROLE jiris_migrator LOGIN; CREATE ROLE visits_app LOGIN; CREATE ROLE billing_app LOGIN;
+GRANT CONNECT, CREATE ON DATABASE jiris TO jiris_migrator;
+GRANT CONNECT ON DATABASE jiris TO visits_app, billing_app;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
+
+-- Chain "visits", run by jiris_migrator; chain "billing" is symmetric
+-- (billing_record, outbox, inbox; role billing_app)
+CREATE SCHEMA IF NOT EXISTS visits;   -- in env.py, before Alembic creates visits.alembic_version
+GRANT USAGE ON SCHEMA visits TO visits_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON visits.visit, visits.outbox, visits.inbox TO visits_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA visits
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO visits_app;
 ```
 
 - Each module uses its own connection pool and role; migrations run per chain under a dedicated owner role (`MIGRATIONS_DATABASE_URL`); application roles get only DML grants (D29).
