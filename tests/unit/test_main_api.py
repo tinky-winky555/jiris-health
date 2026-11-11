@@ -18,7 +18,7 @@ def test_create_app_needs_no_other_connection_setting(monkeypatch: pytest.Monkey
     for name in OTHER_SETTINGS:
         monkeypatch.delenv(name, raising=False)
     app = create_app()
-    assert {route.path for route in app.routes} >= {
+    assert set(app.openapi()["paths"]) == {
         "/api/visits",
         "/api/visits/{visit_id}",
         "/api/visits/{visit_id}/complete",
