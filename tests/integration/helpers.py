@@ -312,3 +312,60 @@ async def consumer_counts(rabbitmq_url: str, queues: tuple[str, ...]) -> dict[st
                 continue
             counts[name] = queue.declaration_result.consumer_count
     return counts
+
+
+async def start_visits_consumer(rabbitmq_url: str, sessions):
+    """The Visits subscriber in the test process, wired as the worker wires it."""
+    from app.visits.consumer import register
+
+    broker = await connected_broker(rabbitmq_url)
+    register(broker, sessions)
+    await broker.start()
+    return broker
+
+
+async def pending_visit(client: httpx.AsyncClient) -> tuple[str, str]:
+    """A visit with an accepted /complete: (visit_id, completion_attempt_id)."""
+    visit = await create_visit(client)
+    response = await client.post(f"/api/visits/{visit['id']}/complete")
+    assert response.status_code == 202, response.text
+    return visit["id"], response.json()["completion_attempt_id"]
+
+
+def billing_reply(
+    visit_id: str,
+    attempt_id: str,
+    *,
+    failed: bool = False,
+    reason: str = "rate rejected",
+    record_id: uuid.UUID | None = None,
+):
+    """A crafted Billing reply envelope for the Visits consumer (module-06 tests)."""
+    from app.contracts import (
+        BILLING_FAILED,
+        BILLING_RECORD_CREATED,
+        BillingFailed,
+        BillingRecordCreated,
+        new_envelope,
+    )
+    from decimal import Decimal
+
+    if failed:
+        return new_envelope(
+            BILLING_FAILED,
+            BillingFailed(
+                visit_id=uuid.UUID(visit_id),
+                completion_attempt_id=uuid.UUID(attempt_id),
+                reason=reason,
+                error_class="permanent",
+            ),
+        )
+    return new_envelope(
+        BILLING_RECORD_CREATED,
+        BillingRecordCreated(
+            visit_id=uuid.UUID(visit_id),
+            completion_attempt_id=uuid.UUID(attempt_id),
+            billing_record_id=record_id or uuid.uuid7(),
+            amount=Decimal("50.00"),
+        ),
+    )

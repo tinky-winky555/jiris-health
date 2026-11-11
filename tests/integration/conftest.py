@@ -270,3 +270,20 @@ async def no_foreign_consumers(stack: Stack) -> None:
     counts = await consumer_counts(stack.rabbitmq_url, ("billing.inbox", "visits.inbox"))
     if any(counts.values()):
         pytest.fail(f"a consumer is attached before the test started: {counts}")
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def visits_sessions(visits_engine) -> object:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    return async_sessionmaker(visits_engine, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def visits_consumer(events_broker, visits_sessions, stack: Stack) -> AsyncIterator[object]:
+    """The Visits subscriber on the session broker for one test."""
+    from tests.integration.helpers import start_visits_consumer
+
+    broker = await start_visits_consumer(stack.rabbitmq_url, visits_sessions)
+    yield broker
+    await broker.stop()
