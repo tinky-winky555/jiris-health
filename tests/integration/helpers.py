@@ -1,8 +1,11 @@
 """Shared steps for integration tests."""
 
 import asyncio
+import json
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -73,3 +76,146 @@ async def wait_for_visit_status(
             return visit
         await asyncio.sleep(POLL_INTERVAL_S)
     raise AssertionError(f"visit {visit_id} did not reach {status!r} in {timeout} s: {visit}")
+
+
+# Broker and outbox helpers (M04)
+
+
+@dataclass(frozen=True)
+class Delivered:
+    """What a test needs to know about one message taken from a queue."""
+
+    message_id: str | None
+    routing_key: str | None
+    body: bytes
+    content_type: str | None
+    delivery_mode: int | None
+    headers: dict
+
+
+async def collect_messages(
+    rabbitmq_url: str,
+    queue: str,
+    message_ids: set[str],
+    *,
+    timeout: float = EVENTUAL_TIMEOUT_S,
+    reject: bool = False,
+) -> list[Delivered]:
+    """Take messages from `queue` until every id in `message_ids` is seen or the timeout ends.
+
+    Messages of other tests are acknowledged and dropped: no consumer exists before M05,
+    and every assertion filters by message id. Wanted messages are acknowledged, or
+    rejected without requeue when `reject` is set. Returns them in arrival order.
+    """
+    import aio_pika
+
+    wanted: list[Delivered] = []
+    deadline = time.monotonic() + timeout
+    connection = await aio_pika.connect(rabbitmq_url)
+    async with connection:
+        channel = await connection.channel()
+        source = await channel.declare_queue(queue, passive=True)
+        while time.monotonic() < deadline and len(wanted) < len(message_ids):
+            message = await source.get(no_ack=False, fail=False)
+            if message is None:
+                await asyncio.sleep(POLL_INTERVAL_S / 2)
+                continue
+            if message.message_id in message_ids:
+                wanted.append(
+                    Delivered(
+                        message_id=message.message_id,
+                        routing_key=message.routing_key,
+                        body=message.body,
+                        content_type=message.content_type,
+                        delivery_mode=int(message.delivery_mode) if message.delivery_mode else None,
+                        headers=dict(message.headers or {}),
+                    )
+                )
+                if reject:
+                    await message.reject(requeue=False)
+                    continue
+            await message.ack()
+    return wanted
+
+
+async def insert_outbox_rows(
+    conn,
+    schema: str,
+    count: int,
+    *,
+    event_type: str = "VisitCompleted",
+    start: datetime | None = None,
+) -> list[uuid.UUID]:
+    """Insert unpublished outbox rows, one microsecond apart, oldest first."""
+    if schema not in ("visits", "billing"):
+        raise ValueError(schema)
+    base = start or datetime.now(UTC)
+    ids = [uuid.uuid7() for _ in range(count)]
+    await conn.executemany(
+        f"INSERT INTO {schema}.outbox (event_id, event_type, schema_version, payload, occurred_at)"
+        " VALUES ($1, $2, 1, $3::jsonb, $4)",
+        [
+            (event_id, event_type, json.dumps({"n": n}), base + timedelta(microseconds=n))
+            for n, event_id in enumerate(ids)
+        ],
+    )
+    return ids
+
+
+async def flush_outbox(relay, max_passes: int = 50) -> None:
+    """Run passes until the relay selects nothing, so a test starts from an empty backlog."""
+    for _ in range(max_passes):
+        if (await relay.run_once()).selected == 0:
+            return
+    raise AssertionError(f"outbox backlog not empty after {max_passes} passes")
+
+
+async def wait_until(predicate, timeout: float = EVENTUAL_TIMEOUT_S, message: str = "") -> None:
+    deadline = time.monotonic() + timeout
+    while not await predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError(message or f"condition not met in {timeout} s")
+        await asyncio.sleep(POLL_INTERVAL_S)
+
+
+class RestartableRabbit:
+    """A RabbitMQ container on a fixed host port, stopped and started without removal, so
+    clients reconnect to the same address (module-04 task 3.1.6)."""
+
+    def __init__(self, container, url: str) -> None:
+        self.container = container
+        self.url = url
+
+    def stop(self) -> None:
+        self.container.get_wrapped_container().stop(timeout=5)
+
+    def start(self) -> None:
+        self.container.get_wrapped_container().start()
+
+    async def wait_ready(self, timeout: float = 60.0) -> None:
+        import aio_pika
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                connection = await aio_pika.connect(self.url)
+                await connection.close()
+                return
+            except Exception:
+                if time.monotonic() > deadline:
+                    raise
+                await asyncio.sleep(0.5)
+
+
+async def connected_broker(rabbitmq_url: str, *, declare: bool = True):
+    """A FastStream broker as the worker builds it: confirms on, returns raise (DL-20)."""
+    from faststream.rabbit import RabbitBroker
+    from faststream.rabbit.schemas import Channel
+
+    from app.outbox.topology import declare_topology
+
+    broker = RabbitBroker(rabbitmq_url, default_channel=Channel(on_return_raises=True))
+    await broker.connect()
+    if declare:
+        await declare_topology(broker)
+    return broker
