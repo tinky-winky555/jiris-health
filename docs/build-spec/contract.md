@@ -230,10 +230,12 @@ Mirrors open entries in `docs/technical-debt.md`.
 
 | ID | Title | State |
 |---|---|---|
-| TD-1 | Local development credentials written in compose, init.sql and test fixtures | Open |
-| TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Open |
-| TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Open |
-| TD-4 | Rejected creation requests (422) leave no command log line | Open |
+| TD-1 | Local development credentials written in compose, init.sql and test fixtures | Done (M08, DL-38) |
+| TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Done (M08, DL-40) |
+| TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Done (M08) |
+| TD-4 | Rejected creation requests (422) leave no command log line | Done (M08) |
 | TD-5 | The relay imports aio-pika and pamqp, which reach the lock only through `faststream[rabbit]` | Done (DL-23) |
-| TD-6 | Classifier treats every OperationalError as database unavailable | Open (target M08) |
-| TD-7 | BillingFailed reason carries the raw exception text | Open (target M08) |
+| TD-6 | Classifier treats every OperationalError as database unavailable | Done (M08, DL-39) |
+| TD-7 | BillingFailed reason carries the raw exception text | Done (M08) |
+
+No technical debt is open.
