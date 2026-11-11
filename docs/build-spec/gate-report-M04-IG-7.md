@@ -118,12 +118,12 @@ after `14349e4`, `c7cded5` and `af581c1`; not collectable in full after
 | Risk or follow-up | Impact | Handling |
 |---|---|---|
 | FastStream adds `x-queue-type = classic` to every queue it declares | A consumer that declares an inbox queue with other arguments fails with `PRECONDITION_FAILED` | M05 and M06 subscribe with the queue objects of `app/outbox/topology.py` (DL-21) |
-| The relay imports `aio-pika` and `pamqp`, present only through `faststream[rabbit]` | A transport change in FastStream would break the relay without a lock conflict | TD-5, close in M08 (dependency change, developer decision) |
+| The relay imports `aio-pika` and `pamqp`, present only through `faststream[rabbit]` | A transport change in FastStream would break the relay without a lock conflict | TD-5, closed before the merge by DL-23 (developer condition on IG-7 approval) |
 | A row excluded at `attempts = 5` stays unpublished for ever; no tool lists or replays it | An operator must find it in the table; the ERROR line with `outcome=excluded` is the only signal | Accepted (DL-19); in M05 the Billing reply types are registered, so no current producer writes an unknown type |
 | A broker failure in the middle of a pass rolls back rows already confirmed in it, which are published again | Duplicate messages | By design (TDD §8.1); consumers de-duplicate by `event_id` from M05 |
 | A long-running worker in the integration session (from M05, when consumers make `worker` ready) publishes rows while other tests run | Assertions on `published_at` would race | M03 checks now use row presence (DL-22); M05 and M06 tests must filter by their own ids |
 | The worker declares the topology once at start; a failure there ends the process with an error, and compose has no restart policy for `worker` | The worker stays down until restarted | Review with operations in M08 (restart policy) |
 | `declare_topology()` binds queues but never removes stale bindings | A renamed routing key would leave the old binding | No rename planned; noted for future changes |
 
-Registers: TD-5 opened and mirrored in contract section 7b. No backlog
-entry.
+Registers: TD-5 opened and mirrored in contract section 7b; closed before
+the merge (DL-23). No backlog entry.

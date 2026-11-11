@@ -160,6 +160,7 @@ repository.
 | DL-20 | 2026-11-11 | TDD §8.1 amended: broker unavailable, connection lost or publish timeout means ROLLBACK, exponential backoff to 30 s, retry forever, `attempts` unchanged (D6); a message returned as unroutable (`mandatory=True`, `on_return_raises=True`) is handled the same way plus an ERROR log line, and the row is never excluded (OQ-11, OQ-12) | approved by the developer (HG-2) |
 | DL-21 | 2026-11-11 | Topology declared by the worker through `app/outbox/topology.py`; exchange names and the routing key registry live in `app.contracts`; index section d updated (OQ-13) | approved by the developer |
 | DL-22 | 2026-11-11 | M03 tests check that the visit's outbox row exists, not that it is unpublished, because from M04 a running relay may publish it between the write and the assertion. Refines DL-15 | approved by the developer |
+| DL-23 | 2026-11-11 | `aio-pika>=10.2.3` and `pamqp>=5.0.0` declared as direct dependencies at their locked versions; no locked version changed. Closes TD-5 | approved by the developer (HG-2) |
 
 ## 7. Open questions and technical debt
 
@@ -197,4 +198,4 @@ Mirrors open entries in `docs/technical-debt.md`.
 | TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Open |
 | TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Open |
 | TD-4 | Rejected creation requests (422) leave no command log line | Open |
-| TD-5 | The relay imports aio-pika and pamqp, which reach the lock only through `faststream[rabbit]` | Open |
+| TD-5 | The relay imports aio-pika and pamqp, which reach the lock only through `faststream[rabbit]` | Done (DL-23) |
