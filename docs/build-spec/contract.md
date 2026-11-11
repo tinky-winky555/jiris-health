@@ -25,7 +25,7 @@ ratified with this contract carry BS-nn IDs.
 | D10 | `/complete` allowed from Scheduled and In Progress | visits |
 | D11 | Billing computes `amount = rate × hours(end − start)`, Decimal, 2 places, ROUND_HALF_UP | billing |
 | D12 | `Reversed` in the model only; no reversal operation | billing |
-| D15 | Transient errors retried up to 5 times (counter in `billing.inbox`); permanent errors fail at once; unclassified count as transient | billing |
+| D15 | Transient errors retried up to 5 times (counter in `billing.inbox`); permanent errors fail at once; unclassified count as transient. Refined by DL-35 (database unavailable: backoff, unlimited, not counted) and DL-36 (SQLSTATE classes 22 and 23 permanent, except 23505) | billing |
 | D16 | On BillingFailed: reset `completion_requested_at`, store `completion_failure_reason` | visits |
 | D17 | `/complete`: 202 winner; 409 pending, lost race or invalid status; 404 unknown | visits |
 | D19, D25 | Polling relay with `FOR UPDATE SKIP LOCKED` in a separate worker; 500 ms, 100 rows, backoff ceiling 30 s; retention 7 days | outbox, worker |
@@ -70,7 +70,7 @@ section 6.
 | Transactions | One transaction per HTTP command and per consumed message; state change and outbox row in the same transaction |
 | Idempotency | Inbox insert `ON CONFLICT (event_id) DO NOTHING` first, then the row `FOR UPDATE`; processed (`billing.inbox.status`, `visits.inbox.processed_at`) → ack without effect; `message_id` = `event_id` |
 | Concurrency | Conditional UPDATE for `/complete`; `SELECT ... FOR UPDATE` on the visit in the Visits consumer; `SKIP LOCKED` in relays |
-| Retries | Relay: unlimited, exponential backoff to 30 s. Billing: 5 attempts for transient or unclassified errors, counted in `billing.inbox`; permanent errors none. Visits consumer (DL-31): database unavailable, unlimited with backoff to 30 s; other errors 5 attempts counted in `visits.inbox`, then parking |
+| Retries | Relay: unlimited, exponential backoff to 30 s. Billing (DL-35, DL-36): database unavailable, unlimited with backoff to 30 s, not counted; 5 attempts for other transient or unclassified errors, counted in `billing.inbox`; permanent errors none. Visits consumer (DL-31): database unavailable, unlimited with backoff to 30 s; other errors 5 attempts counted in `visits.inbox`, then parking |
 | Dead letters | Malformed messages and exhausted retries go to the module's parking queue through `jiris.dlx`; never requeued automatically |
 | Reconnection | aio-pika robust connections under FastStream (R7) |
 | Money | Decimal, numeric(12,2), ROUND_HALF_UP; decimal string in events |
@@ -121,15 +121,16 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | Green: 50 of 50 passed; the `xfail` marker was removed in M06 (`e2a1d54`) after a recorded `XPASS(strict)` 50 of 50. No `xfail` remains in the suite. |
-| Test count | 325 collected on `feature/m06-visits-consumer`, 325 passed, M06 completion. Baseline before M06: 276. |
+| Test count | 353 collected on `feature/m07-failure-paths`, 353 passed, M07 completion. Baseline before M07: 325. |
 | M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
 | Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
 | M04, outbox relay and topology | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition to close TD-5 first (done, DL-23, `0bf2246`); merged into `build/increments` as `fa5dec6` (`Merge M04 outbox-relay: IG-7 approved`) and pushed. Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
 | M05, Billing consumer, happy path | Complete. IG-7 approved by Sasha on 2026-11-11 with the condition of a generic plan regression test (done, `ab215ad`); merged into `build/increments` as `755a547` (`Merge M05 billing-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M05-IG-7.md`: 8 of 8 criteria met. |
-| M06, Visits consumer; T1 green | Complete on `feature/m06-visits-consumer` (from `build/increments` at `755a547`; not merged, not pushed). Completion report `gate-report-M06-IG-7.md`: 10 of 10 criteria met; T1, T3, T6 green. |
-| Current module | None open. M07 (failure paths) is authored after the developer approves the M06 IG-7 report. |
-| Last approved gate | HG-1 on module-06 and `gate-report-M06-IG-3.md`, 2026-11-11. |
-| Next pending gate | Developer review of `gate-report-M06-IG-7.md`, then the BS-3 merge. |
+| M06, Visits consumer; T1 green | Complete. IG-7 approved by Sasha on 2026-11-11 with TD-6 recorded (`0087141`); merged into `build/increments` as `0459df5` (`Merge M06 visits-consumer: IG-7 approved`) and pushed. Completion report `gate-report-M06-IG-7.md`: 10 of 10 criteria met; T1, T3, T6 green. |
+| M07, failure paths in Billing | Complete on `feature/m07-failure-paths` (from `build/increments` at `0459df5`; not merged, not pushed). Completion report `gate-report-M07-IG-7.md`: 8 of 8 criteria met; T4, T5 green. T1 to T8 all green. |
+| Current module | None open. M08 (operations and delivery) is authored after the developer approves the M07 IG-7 report. |
+| Last approved gate | HG-1 on module-07 and `gate-report-M07-IG-3.md`, 2026-11-11. |
+| Next pending gate | Developer review of `gate-report-M07-IG-7.md`, then the BS-3 merge. |
 | Blockers | None. |
 
 ## 6. Decision log
@@ -174,6 +175,8 @@ repository.
 | DL-32 | 2026-11-11 | DL-28 is implemented by time, not by vhost: the `worker` fixture is module scoped; T3 and the worker test start their own worker; sensitive modules start with a guard that fails when an inbox queue has a foreign consumer (OQ-20) | approved by the developer |
 | DL-33 | 2026-11-11 | The consumer mechanics shared by Billing and Visits (manual acknowledgement, raw decoder, prefetch, settling, log line) live in `app/outbox/consumer.py`; `app/billing/consumer.py` uses them with no change of behaviour; the M05 tests pass unchanged, except the M05 assertion that BillingFailed is not registered, which DL-29 reverses (OQ-21) | approved by the developer |
 | DL-34 | 2026-11-11 | Approved before M06 IG-7: `visits.inbox.processed_at` nullable, with `processed_at IS NOT NULL` as the processed marker (DL-31); a BillingFailed for a Completed visit is a no-op with a WARNING line naming `visit_id` and `completion_attempt_id`; TDD §6.4 updated and tested | approved by the developer (HG-2) |
+| DL-35 | 2026-11-11 | TDD §8.2 and D15 refined: in Billing, database unavailable or connection lost is retried with a backoff of 0.5 s doubling to 30 s, without a limit and without counting, as in the relay and the Visits consumer (D6); the 5 attempts of D15 cover every other transient or unclassified error (OQ-22) | approved by the developer (HG-2) |
+| DL-36 | 2026-11-11 | TDD §8.2 amended: the permanent class covers payload validation and database errors of SQLSTATE class 22 and class 23, except `23505` `unique_violation`, which stays transient so that a concurrent duplicate delivery is resolved on retry through the inbox and never emits BillingFailed; held by a test with two concurrent deliveries of one VisitCompleted. M05 test 4.1.9 (overflow requeued, interim) replaced by the permanent path (OQ-23) | approved by the developer (HG-2) |
 
 ## 7. Open questions and technical debt
 
@@ -208,6 +211,8 @@ Resolved questions, kept for traceability:
 | OQ-19 | M06, HG-2: Visits consumer failure policy | Not unlimited requeue: classes as in the relay (database unavailable: backoff, unlimited; malformed: parking; other: counted in `visits.inbox`, parking at 5) | DL-31 |
 | OQ-20 | M06: DL-28 by time, not by vhost | Yes | DL-32 |
 | OQ-21 | M06: shared consumer mechanics in `app/outbox/consumer.py` | Yes; M05 tests pass unchanged | DL-33 |
+| OQ-22 | M07, HG-2: database unavailable in Billing | Yes: backoff to 30 s, unlimited, not counted (D6); D15's 5 attempts for the other transient and unclassified errors | DL-35 |
+| OQ-23 | M07, HG-2: SQLSTATE classes 22 and 23 permanent | Yes, except 23505 `unique_violation`, which stays transient; M05 test 4.1.9 replaced | DL-36 |
 
 ### 7b. Technical debt summary
 
@@ -221,3 +226,4 @@ Mirrors open entries in `docs/technical-debt.md`.
 | TD-4 | Rejected creation requests (422) leave no command log line | Open |
 | TD-5 | The relay imports aio-pika and pamqp, which reach the lock only through `faststream[rabbit]` | Done (DL-23) |
 | TD-6 | Classifier treats every OperationalError as database unavailable | Open (target M08) |
+| TD-7 | BillingFailed reason carries the raw exception text | Open (target M08) |

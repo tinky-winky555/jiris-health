@@ -170,41 +170,176 @@ async def test_malformed_message_is_parked_once_and_the_next_is_processed(
     assert await collect_messages(stack.rabbitmq_url, "billing.inbox", {bad_id}, timeout=1.0) == []
 
 
-# 4.1.9 Interim failure: ROLLBACK, ERROR, requeue after 1 s (DL-25; dedicated broker)
+# Failure paths (module-07 tasks 4.1.5 to 4.1.7 and 4.1.11; TDD section 8.2; D15; DL-35,
+# DL-36). They replace M05 test 4.1.9 (overflow requeued every second, interim DL-25 b).
 
 
-async def test_failed_transaction_requeues_the_message_after_one_second(
-    billing_sessions,
-    billing_db: asyncpg.Connection,
-    isolated_rabbitmq,
-    caplog: pytest.LogCaptureFixture,
+def _bad_times() -> Envelope[VisitCompleted]:
+    event_id = uuid.uuid7()
+    return new_envelope(
+        VISIT_COMPLETED,
+        VisitCompleted(
+            visit_id=uuid.uuid7(),
+            completion_attempt_id=event_id,
+            rate=Decimal("25.00"),
+            start_date_time=datetime(2026, 11, 11, 11, tzinfo=UTC),
+            end_date_time=datetime(2026, 11, 11, 9, tzinfo=UTC),
+        ),
+        event_id=event_id,
+    )
+
+
+async def _billing_failed(db: asyncpg.Connection, attempt: uuid.UUID) -> list[dict]:
+    rows = await db.fetch(
+        "SELECT payload FROM billing.outbox WHERE event_type = 'BillingFailed'"
+        " AND payload->>'completion_attempt_id' = $1",
+        str(attempt),
+    )
+    return [json.loads(r["payload"]) for r in rows]
+
+
+async def _inbox_row(db: asyncpg.Connection, event_id: uuid.UUID) -> asyncpg.Record | None:
+    return await db.fetchrow("SELECT * FROM billing.inbox WHERE event_id = $1", event_id)
+
+
+# 4.1.5 Permanent: BillingFailed at once, acknowledged, never parked
+
+
+async def test_permanent_error_emits_billing_failed_and_acks_once(
+    billing_consumer, billing_db: asyncpg.Connection, stack: Stack, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # 9999999999.99 per hour for 2 hours overflows numeric(12,2): the INSERT fails.
-    envelope = _visit_completed(rate="9999999999.99")
-    broker = await start_billing_consumer(isolated_rabbitmq.url, billing_sessions)
+    envelope = _bad_times()
+    with caplog.at_level(logging.INFO, logger="app.billing"):
+        await _publish(stack.rabbitmq_url, envelope)
+
+        async def failed() -> bool:
+            return await _inbox_status(billing_db, envelope.event_id) == "failed"
+
+        await wait_until(failed, message="permanent failure not recorded")
+        await asyncio.sleep(2.0)
+        lines = _consumed(caplog, f"event_id={envelope.event_id}")
+
+    assert len(lines) == 1, [r.getMessage() for r in lines]
+    assert lines[0].levelno == logging.ERROR
+    assert "outcome=failed" in lines[0].getMessage()
+    assert "error_class=permanent" in lines[0].getMessage()
+    [reply] = await _billing_failed(billing_db, envelope.event_id)
+    assert reply["error_class"] == "permanent"
+    assert await billing_db.fetchval(
+        "SELECT count(*) FROM billing.billing_record WHERE visit_id = $1", envelope.payload.visit_id
+    ) == 0
+    assert await collect_messages(stack.rabbitmq_url, "billing.parking", {str(envelope.event_id)}, timeout=1.0) == []
+
+
+# 4.1.6 Stable transient: counted 5 times, BillingFailed transient_exhausted, parked
+
+
+async def test_stable_transient_error_is_exhausted_after_five_attempts(
+    billing_consumer, billing_db: asyncpg.Connection, stack: Stack, caplog: pytest.LogCaptureFixture
+) -> None:
+    from tests.integration.helpers import failing_insert_trigger
+
+    envelope = _visit_completed()
+    async with failing_insert_trigger(stack, envelope.payload.visit_id):
+        with caplog.at_level(logging.INFO, logger="app.billing"):
+            await _publish(stack.rabbitmq_url, envelope)
+            [parked] = await collect_messages(
+                stack.rabbitmq_url, "billing.parking", {str(envelope.event_id)}, timeout=20.0
+            )
+            lines = _consumed(caplog, f"event_id={envelope.event_id}")
+
+    outcomes = [r.getMessage().split("outcome=")[1].split()[0] for r in lines]
+    assert outcomes == ["requeued"] * 4 + ["parked"], outcomes
+    assert "attempts=5" in lines[-1].getMessage()
+    assert "error_class=transient_exhausted" in lines[-1].getMessage()
+    assert lines[-1].levelno == logging.ERROR
+    [death] = parked.headers["x-death"]
+    assert (death["queue"], death["reason"]) == ("billing.inbox", "rejected")
+    inbox = await _inbox_row(billing_db, envelope.event_id)
+    assert (inbox["status"], inbox["attempts"]) == ("failed", 5)
+    assert "injected failure" in inbox["last_error"]
+    [reply] = await _billing_failed(billing_db, envelope.event_id)
+    assert reply["error_class"] == "transient_exhausted"
+    assert await billing_db.fetchval(
+        "SELECT count(*) FROM billing.billing_record WHERE visit_id = $1", envelope.payload.visit_id
+    ) == 0
+
+    good = _visit_completed()
+    await _publish(stack.rabbitmq_url, good)
+
+    async def good_processed() -> bool:
+        return await _inbox_status(billing_db, good.event_id) == "processed"
+
+    await wait_until(good_processed, message="message after the exhausted one not processed")
+
+
+# 4.1.7 Database unavailable: backoff, never parked, never counted (DL-35; dedicated broker)
+
+
+async def test_database_outage_requeues_with_backoff_and_never_counts(
+    isolated_rabbitmq, billing_db: asyncpg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    import socket
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        closed_port = sock.getsockname()[1]
+    unreachable = create_async_engine(f"postgresql+asyncpg://billing_app:billing_app@127.0.0.1:{closed_port}/jiris")
+    envelope = _visit_completed()
+    broker = await start_billing_consumer(
+        isolated_rabbitmq.url, async_sessionmaker(unreachable, expire_on_commit=False)
+    )
     try:
         with caplog.at_level(logging.INFO, logger="app.billing"):
             await _publish(isolated_rabbitmq.url, envelope)
 
-            async def requeued_twice() -> bool:
-                return len(_consumed(caplog, f"event_id={envelope.event_id}")) >= 2
+            async def three_deliveries() -> bool:
+                return len(_consumed(caplog, f"event_id={envelope.event_id}")) >= 3
 
-            await wait_until(requeued_twice, message="message not delivered again")
-            first, second = _consumed(caplog, f"event_id={envelope.event_id}")[:2]
+            await wait_until(three_deliveries, timeout=15.0, message="message not redelivered")
+            first, second, third = _consumed(caplog, f"event_id={envelope.event_id}")[:3]
     finally:
         await broker.stop()
+        await unreachable.dispose()
 
-    for record in (first, second):
-        assert record.levelno == logging.ERROR
+    for record in (first, second, third):
         assert "outcome=requeued" in record.getMessage()
-    assert "redelivered=False" in first.getMessage()
-    assert "redelivered=True" in second.getMessage()
-    assert second.created - first.created >= 1.0
-    assert await _inbox_status(billing_db, envelope.event_id) is None
+        assert "cause=database_unavailable" in record.getMessage()
+    gap_one, gap_two = second.created - first.created, third.created - second.created
+    assert gap_one >= 0.5 and gap_two >= 1.0 and gap_two > gap_one, (gap_one, gap_two)
+    assert await collect_messages(isolated_rabbitmq.url, "billing.parking", {str(envelope.event_id)}, timeout=1.0) == []
+    [kept] = await collect_messages(isolated_rabbitmq.url, "billing.inbox", {str(envelope.event_id)})
+    assert kept.message_id == str(envelope.event_id)
+    assert await _inbox_row(billing_db, envelope.event_id) is None
+
+
+# 4.1.11 Concurrent duplicate delivery: one record, no BillingFailed (DL-36: 23505 transient)
+
+
+async def test_concurrent_duplicate_delivery_gives_one_record_and_no_billing_failed(
+    billing_consumer, billing_sessions, billing_db: asyncpg.Connection, stack: Stack
+) -> None:
+    second_consumer = await start_billing_consumer(stack.rabbitmq_url, billing_sessions)
+    try:
+        envelope = _visit_completed()
+        await asyncio.gather(_publish(stack.rabbitmq_url, envelope), _publish(stack.rabbitmq_url, envelope))
+
+        async def processed() -> bool:
+            return await _inbox_status(billing_db, envelope.event_id) == "processed"
+
+        await wait_until(processed, message="VisitCompleted not processed")
+        await asyncio.sleep(2.0)  # both deliveries settled by now
+    finally:
+        await second_consumer.stop()
+
     assert await billing_db.fetchval(
         "SELECT count(*) FROM billing.billing_record WHERE visit_id = $1", envelope.payload.visit_id
-    ) == 0
+    ) == 1
     assert await billing_db.fetchval(
-        "SELECT count(*) FROM billing.outbox WHERE payload->>'visit_id' = $1",
+        "SELECT count(*) FROM billing.outbox WHERE event_type = 'BillingRecordCreated'"
+        " AND payload->>'visit_id' = $1",
         str(envelope.payload.visit_id),
-    ) == 0
+    ) == 1
+    assert await _billing_failed(billing_db, envelope.event_id) == []

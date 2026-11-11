@@ -191,3 +191,78 @@ async def test_on_conflict_survives_the_generic_plan(
     )
     assert {o.billing_record_id for o in outcomes} == {record["id"]}
     assert len(await _replies(billing_db, visit_id)) == attempts
+
+
+# Failure paths (module-07 tasks 4.1.3 and 4.1.4; TDD section 8.2; D15; DL-35, DL-36)
+
+
+def _bad_times(visit_id: uuid.UUID | None = None) -> Envelope[VisitCompleted]:
+    event_id = uuid.uuid7()
+    return new_envelope(
+        VISIT_COMPLETED,
+        VisitCompleted(
+            visit_id=visit_id or uuid.uuid7(),
+            completion_attempt_id=event_id,
+            rate=Decimal("25.00"),
+            start_date_time=datetime(2026, 11, 11, 11, tzinfo=UTC),
+            end_date_time=datetime(2026, 11, 11, 11, tzinfo=UTC),
+        ),
+        event_id=event_id,
+    )
+
+
+async def _failed_replies(db: asyncpg.Connection, visit_id: uuid.UUID) -> list[dict]:
+    rows = await db.fetch(
+        "SELECT payload FROM billing.outbox WHERE event_type = 'BillingFailed'"
+        " AND payload->>'visit_id' = $1",
+        str(visit_id),
+    )
+    return [json.loads(r["payload"]) for r in rows]
+
+
+async def test_permanent_failure_is_recorded_once_with_billing_failed(
+    billing_sessions, billing_db: asyncpg.Connection
+) -> None:
+    from app.billing.service import PermanentError, record_permanent_failure
+
+    envelope = _bad_times()
+    with pytest.raises(PermanentError) as caught:
+        await _process(billing_sessions, envelope)
+
+    async with billing_sessions.begin() as session:
+        reply_id = await record_permanent_failure(session, envelope, caught.value)
+
+    [inbox] = await _inbox(billing_db, envelope.event_id)
+    assert inbox["status"] == "failed"
+    assert "duration" in inbox["last_error"]
+    assert await _records(billing_db, envelope.payload.visit_id) == []
+    [failed] = await _failed_replies(billing_db, envelope.payload.visit_id)
+    assert failed["error_class"] == "permanent"
+    assert failed["completion_attempt_id"] == str(envelope.event_id)
+    assert "duration" in failed["reason"]
+    assert reply_id is not None
+    assert (await _process(billing_sessions, envelope)).duplicate is True
+    assert len(await _failed_replies(billing_db, envelope.payload.visit_id)) == 1
+
+
+async def test_transient_failures_are_counted_and_the_fifth_emits_billing_failed(
+    billing_sessions, billing_db: asyncpg.Connection
+) -> None:
+    from app.billing.service import count_transient_failure
+
+    envelope = _visit_completed()
+    counts = []
+    for n in range(5):
+        async with billing_sessions.begin() as session:
+            counts.append(await count_transient_failure(session, envelope, RuntimeError(f"timeout {n}")))
+
+    assert [c.attempts for c in counts] == [1, 2, 3, 4, 5]
+    assert [c.exhausted for c in counts] == [False] * 4 + [True]
+    [inbox] = await _inbox(billing_db, envelope.event_id)
+    assert (inbox["status"], inbox["attempts"]) == ("failed", 5)
+    assert "timeout 4" in inbox["last_error"]
+    assert await _records(billing_db, envelope.payload.visit_id) == []
+    [failed] = await _failed_replies(billing_db, envelope.payload.visit_id)
+    assert failed["error_class"] == "transient_exhausted"
+    assert "timeout 4" in failed["reason"]
+    assert (await _process(billing_sessions, envelope)).duplicate is True

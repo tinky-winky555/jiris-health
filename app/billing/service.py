@@ -1,8 +1,9 @@
 """Amount calculation and record creation for one VisitCompleted (TDD section 8.2; D3, D11, R8).
 
 `process_visit_completed` runs inside the caller's transaction: the inbox row, the billing
-record and the BillingRecordCreated reply are committed together or not at all. Error
-classification (permanent, counted transient) arrives with M07.
+record and the BillingRecordCreated reply are committed together or not at all. After a
+failure the consumer calls `record_permanent_failure` or `count_transient_failure` in a new,
+short transaction (TDD section 8.2; D15; contract DL-35, DL-36).
 """
 
 import uuid
@@ -15,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.models import (
+    INBOX_FAILED,
     INBOX_PROCESSED,
     INBOX_PROCESSING,
     RECORD_CREATED,
@@ -23,7 +25,9 @@ from app.billing.models import (
     Outbox,
 )
 from app.contracts import (
+    BILLING_FAILED,
     BILLING_RECORD_CREATED,
+    BillingFailed,
     BillingRecordCreated,
     Envelope,
     VisitCompleted,
@@ -35,11 +39,24 @@ MICROSECONDS_PER_HOUR = Decimal(3_600_000_000)
 ACTIVE_RECORD_PREDICATE = text(f"status = '{RECORD_CREATED}'")
 
 
+TRANSIENT_ATTEMPT_LIMIT = 5  # D15
+REASON_MAX = 500
+LAST_ERROR_MAX = 2000
+
+
+class PermanentError(Exception):
+    """The payload cannot be billed, whatever the number of retries (D15)."""
+
+
 def compute_amount(rate: Decimal, start: datetime, end: datetime) -> Decimal:
     """rate x hours(end - start), from the exact duration in microseconds, 2 places, HALF_UP."""
     if not isinstance(rate, Decimal):
         raise TypeError("rate must be a Decimal")
+    if rate <= 0:
+        raise PermanentError(f"non-positive rate {rate}")
     duration = end - start
+    if duration.total_seconds() <= 0:
+        raise PermanentError(f"non-positive duration {duration}")
     microseconds = (duration.days * 86_400 + duration.seconds) * 1_000_000 + duration.microseconds
     return to_money(rate * Decimal(microseconds) / MICROSECONDS_PER_HOUR)
 
@@ -130,3 +147,115 @@ async def process_visit_completed(
     return BillingOutcome(
         duplicate=False, billing_record_id=record_id, reply_event_id=reply.event_id, amount=amount
     )
+
+
+# Failure paths (TDD section 8.2): each runs in its own short transaction after the ROLLBACK
+
+
+def describe(error: BaseException) -> str:
+    """Type and first line of the message; never the payload."""
+    first_line = str(error).strip().splitlines()[0] if str(error).strip() else ""
+    return f"{type(error).__name__}: {first_line}"
+
+
+def _billing_failed(
+    envelope: Envelope[VisitCompleted], reason: str, error_class: str
+) -> Outbox:
+    reply = new_envelope(
+        BILLING_FAILED,
+        BillingFailed(
+            visit_id=envelope.payload.visit_id,
+            completion_attempt_id=envelope.payload.completion_attempt_id,
+            reason=reason[:REASON_MAX],
+            error_class=error_class,
+        ),
+    )
+    return Outbox(
+        event_id=reply.event_id,
+        event_type=reply.event_type,
+        schema_version=reply.schema_version,
+        payload=reply.payload.model_dump(mode="json"),
+        occurred_at=reply.occurred_at,
+    )
+
+
+async def record_permanent_failure(
+    session: AsyncSession, envelope: Envelope[VisitCompleted], error: BaseException
+) -> uuid.UUID | None:
+    """Inbox `failed` and one BillingFailed `permanent`; None if the event was settled
+    meanwhile (processed or failed), so the reply is written at most once."""
+    reason = describe(error)
+    statement = insert(Inbox).values(
+        event_id=envelope.event_id,
+        event_type=envelope.event_type,
+        status=INBOX_FAILED,
+        last_error=reason[:LAST_ERROR_MAX],
+        processed_at=func.now(),
+    )
+    settled = (
+        await session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[Inbox.event_id],
+                set_={
+                    "status": INBOX_FAILED,
+                    "last_error": statement.excluded.last_error,
+                    "processed_at": func.now(),
+                },
+                where=Inbox.status == INBOX_PROCESSING,
+            ).returning(Inbox.event_id)
+        )
+    ).scalar_one_or_none()
+    if settled is None:
+        return None
+    reply = _billing_failed(envelope, reason, "permanent")
+    session.add(reply)
+    await session.flush()
+    return reply.event_id
+
+
+@dataclass(frozen=True)
+class TransientCount:
+    attempts: int
+    exhausted: bool
+    settled: bool = False  # the event was processed or failed meanwhile
+    reply_event_id: uuid.UUID | None = None
+
+
+async def count_transient_failure(
+    session: AsyncSession,
+    envelope: Envelope[VisitCompleted],
+    error: BaseException,
+    limit: int = TRANSIENT_ATTEMPT_LIMIT,
+) -> TransientCount:
+    """attempts + 1 and last_error; at `limit`, inbox `failed` and one BillingFailed
+    `transient_exhausted` (D15). The counter survives restarts."""
+    last_error = describe(error)
+    statement = insert(Inbox).values(
+        event_id=envelope.event_id,
+        event_type=envelope.event_type,
+        status=INBOX_PROCESSING,
+        attempts=1,
+        last_error=last_error[:LAST_ERROR_MAX],
+    )
+    attempts = (
+        await session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[Inbox.event_id],
+                set_={"attempts": Inbox.attempts + 1, "last_error": statement.excluded.last_error},
+                where=Inbox.status == INBOX_PROCESSING,
+            ).returning(Inbox.attempts)
+        )
+    ).scalar_one_or_none()
+    if attempts is None:
+        return TransientCount(attempts=0, exhausted=False, settled=True)
+    if attempts < limit:
+        return TransientCount(attempts=attempts, exhausted=False)
+    await session.execute(
+        update(Inbox)
+        .where(Inbox.event_id == envelope.event_id)
+        .values(status=INBOX_FAILED, processed_at=func.now())
+    )
+    reply = _billing_failed(envelope, last_error, "transient_exhausted")
+    session.add(reply)
+    await session.flush()
+    return TransientCount(attempts=attempts, exhausted=True, reply_event_id=reply.event_id)

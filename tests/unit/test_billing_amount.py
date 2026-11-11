@@ -45,3 +45,22 @@ def test_amount_does_not_depend_on_the_time_zone_of_the_inputs() -> None:
 def test_amount_refuses_a_float_rate() -> None:
     with pytest.raises(TypeError):
         compute_amount(25.0, START, START + timedelta(hours=2))  # type: ignore[arg-type]
+
+
+# Permanent validation (module-07 task 4.1.1; D15)
+
+
+@pytest.mark.parametrize(
+    ("rate", "duration"),
+    [
+        pytest.param("25.00", timedelta(0), id="zero-duration"),
+        pytest.param("25.00", -timedelta(minutes=30), id="negative-duration"),
+        pytest.param("0.00", timedelta(hours=1), id="zero-rate"),
+        pytest.param("-1.00", timedelta(hours=1), id="negative-rate"),
+    ],
+)
+def test_invalid_payload_is_a_permanent_error(rate: str, duration: timedelta) -> None:
+    from app.billing.service import PermanentError
+
+    with pytest.raises(PermanentError):
+        compute_amount(Decimal(rate), START, START + duration)

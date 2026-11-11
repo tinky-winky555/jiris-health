@@ -45,7 +45,8 @@ class MalformedMessage(Exception):
     """The body is not an envelope this consumer accepts (R9): parked, never retried."""
 
 
-def _chain(error: BaseException) -> Iterator[BaseException]:
+def error_chain(error: BaseException) -> Iterator[BaseException]:
+    """The error, its `orig` (SQLAlchemy), causes and contexts, each once."""
     seen: set[int] = set()
     pending: list[BaseException | None] = [error]
     while pending:
@@ -59,7 +60,7 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
 
 def is_database_unavailable(error: BaseException) -> bool:
     """True when the database cannot be reached or the connection was lost (DL-31)."""
-    for current in _chain(error):
+    for current in error_chain(error):
         if isinstance(current, DBAPIError) and current.connection_invalidated:
             return True
         if isinstance(current, _UNAVAILABLE):
