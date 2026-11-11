@@ -7,6 +7,7 @@ owner role, the worker as a separate process and the API app in process.
 
 import asyncio
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -22,7 +23,7 @@ from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import ExecWaitStrategy, LogMessageWaitStrategy
 
-from tests.integration.helpers import Stack, WorkerNotReady
+from tests.integration.helpers import RestartableRabbit, Stack, WorkerNotReady, connected_broker
 
 ROOT = Path(__file__).resolve().parents[2]
 POSTGRES_IMAGE = "postgres:18.1-alpine"
@@ -192,3 +193,51 @@ async def billing_db(stack: Stack) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(stack.billing_dsn)
     yield conn
     await conn.close()
+
+
+# Broker, relay and isolated broker fixtures (M04)
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def events_broker(stack: Stack) -> AsyncIterator[object]:
+    """The session broker with the topology declared (module-04 task 3.3)."""
+    broker = await connected_broker(stack.rabbitmq_url)
+    yield broker
+    await broker.stop()
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def visits_engine(stack: Stack) -> AsyncIterator[object]:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(stack.env["VISITS_DATABASE_URL"])
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def billing_engine(stack: Stack) -> AsyncIterator[object]:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(stack.env["BILLING_DATABASE_URL"])
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+def isolated_rabbitmq() -> Iterator[RestartableRabbit]:
+    """A broker of its own, on a fixed host port, for outage and routing failure tests."""
+    port = _free_port()
+    container = (
+        DockerContainer(RABBITMQ_IMAGE)
+        .with_bind_ports(5672, port)
+        .waiting_for(LogMessageWaitStrategy("Server startup complete"))
+    )
+    with container:
+        yield RestartableRabbit(container, f"amqp://guest:guest@{container.get_container_host_ip()}:{port}/")

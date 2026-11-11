@@ -2,6 +2,7 @@
 
 Imports nothing from app.visits or app.billing (import-linter). M03 defines the
 envelope and VisitCompleted; the Billing replies arrive with M05 and M06 (contract DL-14).
+M04 adds the exchange names and the event type to routing key registry (DL-21).
 """
 
 import uuid
@@ -18,6 +19,9 @@ from pydantic import (
     ConfigDict,
     PlainSerializer,
 )
+
+EXCHANGE = "jiris.events"  # topic exchange of every event (TDD section 7.1)
+DEAD_LETTER_EXCHANGE = "jiris.dlx"  # direct exchange to the parking queues (DL-18)
 
 CENT = Decimal("0.01")
 
@@ -37,7 +41,8 @@ def _money_text(value: Decimal) -> str:
     return str(value)
 
 
-def _utc_z(value: datetime) -> str:
+def format_timestamp(value: datetime) -> str:
+    """UTC with a Z suffix, the wire form of every timestamp (TDD section 7)."""
     return value.astimezone(UTC).isoformat().removesuffix("+00:00") + "Z"
 
 
@@ -51,7 +56,7 @@ Money = Annotated[
 ]
 
 # Timestamps carry a time zone and travel as UTC with a Z suffix.
-Timestamp = Annotated[AwareDatetime, PlainSerializer(_utc_z, return_type=str, when_used="json")]
+Timestamp = Annotated[AwareDatetime, PlainSerializer(format_timestamp, return_type=str, when_used="json")]
 
 
 class Payload(BaseModel):
@@ -94,6 +99,15 @@ class EventSpec[P: Payload]:
 
 VISIT_COMPLETED = EventSpec("VisitCompleted", "visits.visit_completed", VisitCompleted)
 
+# Every event the system can publish, by event type. The outbox relay routes only these.
+EVENTS: dict[str, EventSpec] = {spec.event_type: spec for spec in (VISIT_COMPLETED,)}
+
+
+def routing_key_for(event_type: str) -> str | None:
+    """Routing key of a known event type, or None when the type is not registered."""
+    spec = EVENTS.get(event_type)
+    return spec.routing_key if spec else None
+
 
 def new_envelope[P: Payload](
     spec: EventSpec[P],
@@ -114,6 +128,9 @@ def new_envelope[P: Payload](
 
 
 __all__ = [
+    "DEAD_LETTER_EXCHANGE",
+    "EVENTS",
+    "EXCHANGE",
     "VISIT_COMPLETED",
     "Envelope",
     "EventSpec",
@@ -121,6 +138,8 @@ __all__ = [
     "Payload",
     "Timestamp",
     "VisitCompleted",
+    "format_timestamp",
     "new_envelope",
+    "routing_key_for",
     "to_money",
 ]
