@@ -7,6 +7,7 @@ owner role, the worker as a separate process and the API app in process.
 
 import asyncio
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -40,14 +41,46 @@ DATABASE = "jiris"
 WORKER_READY_TIMEOUT_S = 30.0
 
 
+# Random per session, never written down (TD-1, DL-38): superuser, roles, broker user.
+SUPERUSER_PASSWORD = secrets.token_urlsafe(24)
+ROLE_PASSWORDS = {role: secrets.token_urlsafe(24) for role in ("jiris_migrator", "visits_app", "billing_app")}
+BROKER_USER = f"jiris_{secrets.token_hex(4)}"
+BROKER_PASSWORD = secrets.token_urlsafe(24)
+INIT_VARIABLES = {
+    "migrator_password": ROLE_PASSWORDS["jiris_migrator"],
+    "visits_password": ROLE_PASSWORDS["visits_app"],
+    "billing_password": ROLE_PASSWORDS["billing_app"],
+}
+
+
 def _asyncpg_dsn(sqlalchemy_url: str) -> str:
     return sqlalchemy_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
+def render_init_sql(variables: dict[str, str]) -> str:
+    """docker/postgres/init.sql with its psql variables set, as init.sh does with psql -v."""
+    sql = (ROOT / "docker/postgres/init.sql").read_text()
+    for name, value in variables.items():
+        sql = sql.replace(f":'{name}'", "'" + value.replace("'", "''") + "'")
+    return sql
+
+
+def broker_container(*, port: int | None = None) -> DockerContainer:
+    container = DockerContainer(RABBITMQ_IMAGE).with_env("RABBITMQ_DEFAULT_USER", BROKER_USER).with_env(
+        "RABBITMQ_DEFAULT_PASS", BROKER_PASSWORD
+    )
+    container = container.with_bind_ports(5672, port) if port else container.with_exposed_ports(5672)
+    return container.waiting_for(LogMessageWaitStrategy("Server startup complete"))
+
+
+def broker_url(host: str, port: int | str) -> str:
+    return f"amqp://{BROKER_USER}:{BROKER_PASSWORD}@{host}:{port}/"
 
 
 @pytest.fixture(scope="session")
 def postgres() -> Iterator[PostgresContainer]:
     container = PostgresContainer(
-        POSTGRES_IMAGE, username="postgres", password="postgres", dbname=DATABASE, driver=None
+        POSTGRES_IMAGE, username="postgres", password=SUPERUSER_PASSWORD, dbname=DATABASE, driver=None
     ).waiting_for(ExecWaitStrategy(["pg_isready", "-U", "postgres", "-d", DATABASE]))
     with container:
         yield container
@@ -55,11 +88,7 @@ def postgres() -> Iterator[PostgresContainer]:
 
 @pytest.fixture(scope="session")
 def rabbitmq() -> Iterator[DockerContainer]:
-    container = (
-        DockerContainer(RABBITMQ_IMAGE)
-        .with_exposed_ports(5672)
-        .waiting_for(LogMessageWaitStrategy("Server startup complete"))
-    )
+    container = broker_container()
     with container:
         yield container
 
@@ -70,11 +99,9 @@ def stack(postgres: PostgresContainer, rabbitmq: DockerContainer) -> Stack:
     port = postgres.get_exposed_port(5432)
 
     def url(role: str) -> str:
-        return f"postgresql+asyncpg://{role}:{role}@{host}:{port}/{DATABASE}"
+        return f"postgresql+asyncpg://{role}:{ROLE_PASSWORDS[role]}@{host}:{port}/{DATABASE}"
 
-    rabbitmq_url = (
-        f"amqp://guest:guest@{rabbitmq.get_container_host_ip()}:{rabbitmq.get_exposed_port(5672)}/"
-    )
+    rabbitmq_url = broker_url(rabbitmq.get_container_host_ip(), rabbitmq.get_exposed_port(5672))
     env = {
         "VISITS_DATABASE_URL": url("visits_app"),
         "BILLING_DATABASE_URL": url("billing_app"),
@@ -85,7 +112,7 @@ def stack(postgres: PostgresContainer, rabbitmq: DockerContainer) -> Stack:
     async def bootstrap_roles() -> None:
         conn = await asyncpg.connect(postgres.get_connection_url(driver=None))
         try:
-            await conn.execute((ROOT / "docker/postgres/init.sql").read_text())
+            await conn.execute(render_init_sql(INIT_VARIABLES))
         finally:
             await conn.close()
 
@@ -104,6 +131,7 @@ def stack(postgres: PostgresContainer, rabbitmq: DockerContainer) -> Stack:
         visits_dsn=_asyncpg_dsn(env["VISITS_DATABASE_URL"]),
         billing_dsn=_asyncpg_dsn(env["BILLING_DATABASE_URL"]),
         rabbitmq_url=rabbitmq_url,
+        passwords=dict(ROLE_PASSWORDS),
     )
 
 
@@ -230,13 +258,9 @@ async def billing_engine(stack: Stack) -> AsyncIterator[object]:
 def isolated_rabbitmq() -> Iterator[RestartableRabbit]:
     """A broker of its own, on a fixed host port, for outage and routing failure tests."""
     port = _free_port()
-    container = (
-        DockerContainer(RABBITMQ_IMAGE)
-        .with_bind_ports(5672, port)
-        .waiting_for(LogMessageWaitStrategy("Server startup complete"))
-    )
+    container = broker_container(port=port)
     with container:
-        yield RestartableRabbit(container, f"amqp://guest:guest@{container.get_container_host_ip()}:{port}/")
+        yield RestartableRabbit(container, broker_url(container.get_container_host_ip(), port))
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")

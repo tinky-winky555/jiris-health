@@ -143,12 +143,13 @@ def _closed_port() -> int:
 
 
 async def test_database_outage_requeues_with_backoff_and_never_parks(
-    isolated_rabbitmq, make_client, visits_db: asyncpg.Connection, caplog: pytest.LogCaptureFixture
+    isolated_rabbitmq, stack: Stack, make_client, visits_db: asyncpg.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     visit_id, attempt = await pending_visit(make_client())
     reply = billing_reply(visit_id, attempt)
+    host_and_port = stack.env["VISITS_DATABASE_URL"].split("@", 1)[1].split("/", 1)[0]
     unreachable = create_async_engine(
-        f"postgresql+asyncpg://visits_app:visits_app@127.0.0.1:{_closed_port()}/jiris"
+        stack.env["VISITS_DATABASE_URL"].replace(host_and_port, f"127.0.0.1:{_closed_port()}")
     )
     broker = await start_visits_consumer(
         isolated_rabbitmq.url, async_sessionmaker(unreachable, expire_on_commit=False)

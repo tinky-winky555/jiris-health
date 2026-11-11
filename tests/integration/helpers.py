@@ -29,6 +29,7 @@ class Stack:
     visits_dsn: str
     billing_dsn: str
     rabbitmq_url: str
+    passwords: dict[str, str]  # per role, random per session (TD-1, DL-38)
 
 
 async def create_visit(
