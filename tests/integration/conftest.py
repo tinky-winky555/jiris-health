@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass
 from pathlib import Path
 
 import aio_pika
@@ -23,19 +22,13 @@ from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import ExecWaitStrategy, LogMessageWaitStrategy
 
+from tests.integration.helpers import Stack
+
 ROOT = Path(__file__).resolve().parents[2]
 POSTGRES_IMAGE = "postgres:18.1-alpine"
 RABBITMQ_IMAGE = "rabbitmq:4.2-alpine"
 DATABASE = "jiris"
 WORKER_READY_TIMEOUT_S = 30.0
-
-
-@dataclass(frozen=True)
-class Stack:
-    env: dict[str, str]
-    visits_dsn: str
-    billing_dsn: str
-    rabbitmq_url: str
 
 
 def _asyncpg_dsn(sqlalchemy_url: str) -> str:

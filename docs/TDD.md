@@ -340,6 +340,9 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 
 - Cluster bootstrap (`docker/postgres/init.sql`, run once by the superuser) creates the login roles `jiris_migrator` (migration owner, `CONNECT, CREATE` on the database), `visits_app` and `billing_app` (`CONNECT` only), and revokes `public` from `PUBLIC`.
 - The Alembic chains run under `jiris_migrator` (`MIGRATIONS_DATABASE_URL`); they create the schemas and tables, own them, and grant DML to the application roles.
+- Each chain keeps its version table in its own schema (`visits.alembic_version`, `billing.alembic_version`); the chain's `env.py` runs `CREATE SCHEMA IF NOT EXISTS` before Alembic starts, because the version table needs the schema.
+- DML is granted on the module's named tables, not `ON ALL TABLES`, so the application role cannot touch `alembic_version`; `ALTER DEFAULT PRIVILEGES IN SCHEMA` gives the same DML on tables created by later migrations. T7 permanently checks that neither application role can SELECT, INSERT, UPDATE or DELETE on its `alembic_version`.
+- `alembic -n <chain> check` runs in the test suite and fails when the SQLAlchemy models and the migrations drift apart.
 - In docker-compose, migrations run in a dedicated one-shot service `migrate` (`alembic -n visits upgrade head`, then `alembic -n billing upgrade head`). `api` and `worker` depend on it with `condition: service_completed_successfully`; the API process never runs migrations.
 
 ## 10. Configuration

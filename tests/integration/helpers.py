@@ -2,11 +2,22 @@
 
 import asyncio
 import time
+from dataclasses import dataclass
 
 import httpx
 
 EVENTUAL_TIMEOUT_S = 10.0  # D28
 POLL_INTERVAL_S = 0.1
+
+
+@dataclass(frozen=True)
+class Stack:
+    """Connection settings of the stack started by the integration fixtures."""
+
+    env: dict[str, str]
+    visits_dsn: str
+    billing_dsn: str
+    rabbitmq_url: str
 
 
 async def create_visit(

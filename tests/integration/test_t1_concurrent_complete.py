@@ -17,6 +17,8 @@ T1_RUNS = 50
 pytestmark = pytest.mark.integration
 
 
+# Remove in the Visits consumer increment, when the full flow exists.
+@pytest.mark.xfail(strict=True, reason="needs relay and consumers")
 @pytest.mark.parametrize("run", range(T1_RUNS))
 async def test_t1_concurrent_complete_yields_one_winner_and_one_billing_record(
     run: int,
