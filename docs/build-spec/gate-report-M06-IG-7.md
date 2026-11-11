@@ -138,8 +138,8 @@ after `e82e78d` and `e01b3f1`; not collectable in full after `7303873` to
 | The Billing consumer still requeues every non-parse failure every second for ever (DL-25, interim) | A poison VisitCompleted loops until M07 | M07 replaces it with the Billing failure path |
 | A reply parked after 5 attempts leaves its visit pending; no tool replays it | The visit stays pending until an operator acts | Accepted (DL-31); `visits.inbox.last_error` and the ERROR line name the cause; replay tooling is not in this release |
 | Backoff for an unavailable database is per consumer process and blocks that consumer while it waits | Other replies wait too | Intended: nothing can be processed without the database |
-| `is_database_unavailable()` treats every SQLAlchemy `OperationalError` as an outage | A non-connection operational error would retry for ever instead of being counted | Matches DL-31's intent; review if such an error appears in practice |
+| `is_database_unavailable()` treats every SQLAlchemy `OperationalError` as an outage | A non-connection operational error would retry for ever instead of being counted | TD-6, target M08: narrow by SQLSTATE (`08`, `57P`, `40001`, `40P01` temporary; the rest counted) |
 | The worker logs FastStream's own lines next to ours | Two log formats | M08 logging review |
 | T3 relies on aio-pika restoring consumers after a restart (A1 of IG-3) | Proven by T3 at 13 s; a library change could break it | T3 runs in every suite |
 
-Registers: no new technical debt or backlog entry.
+Registers: TD-6 opened at the developer's request on IG-7 approval and mirrored in contract section 7b. No backlog entry.

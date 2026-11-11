@@ -220,3 +220,4 @@ Mirrors open entries in `docs/technical-debt.md`.
 | TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Open |
 | TD-4 | Rejected creation requests (422) leave no command log line | Open |
 | TD-5 | The relay imports aio-pika and pamqp, which reach the lock only through `faststream[rabbit]` | Done (DL-23) |
+| TD-6 | Classifier treats every OperationalError as database unavailable | Open (target M08) |
