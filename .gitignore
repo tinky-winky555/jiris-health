@@ -81,7 +81,6 @@ Thumbs.db
 .claude/
 
 #doc
-/tests
 
 .mcp.json
 
@@ -110,3 +109,4 @@ ca/*.pem
 # are handed over through a secure channel, never through this repository.
 db/scripts/issued/
 *.jwt
+.import_linter_cache/

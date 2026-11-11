@@ -40,12 +40,13 @@ First task: check that the compiled dependencies (asyncpg, pydantic-core) instal
 
 ## Commands
 
-[PROPOSAL] Fill in once the scaffolding exists (package manager not decided yet):
+Package manager: uv (`pyproject.toml`, `uv.lock`, Python pinned in `.python-version`).
 
+- Install: `uv sync`
 - Run locally: `docker compose up`
-- Tests: `pytest`
-- Boundaries: `lint-imports`
-- Migrations: `alembic -n visits upgrade head`, `alembic -n billing upgrade head`
+- Tests: `uv run pytest`
+- Boundaries: `uv run lint-imports`
+- Migrations: `uv run alembic -n visits upgrade head`, `uv run alembic -n billing upgrade head`
 
 ## Definition of done
 

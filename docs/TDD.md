@@ -69,7 +69,7 @@ flowchart TB
 | Tests | pytest, httpx AsyncClient, testcontainers (PostgreSQL, RabbitMQ) | decided (D21) |
 | Data access | SQLAlchemy 2 async + asyncpg | decided (D28) |
 | Python version | 3.15.2 or later | decided (D28). Risk: 3.15 shipped in October 2026; check that asyncpg, pydantic-core and other compiled dependencies publish 3.15 wheels before pinning |
-| Local run | docker-compose: postgres, rabbitmq, api, worker | decided (D28) |
+| Local run | docker-compose: postgres, rabbitmq, api, worker, plus a one-shot `migrate` service (section 9.1) | decided (D28; `migrate` approved by Sasha on 2026-11-11) |
 
 ## 4. Repository layout (D28)
 
@@ -167,6 +167,17 @@ stateDiagram-v2
 | `POST /api/visits/{id}/cancel` | → Canceled; 409 while pending | decided (D28) |
 | `POST /api/visits/{id}/missed` | Scheduled → Missed; 409 while pending | decided (D28) |
 | `GET /api/billing-records?visit_id=` | Read billing records (for tests and clients) | decided (D28) |
+
+Success responses of the supporting endpoints (approved by Sasha on 2026-11-11):
+
+| Endpoint | Code | Body |
+|---|---|---|
+| `POST /api/visits` | 201 | the created visit |
+| `GET /api/visits/{id}` | 200 | the visit |
+| `POST /api/visits/{id}/start`, `/cancel`, `/missed` | 200 | the visit after the transition |
+| `GET /api/billing-records?visit_id=` | 200 | JSON array of billing records (empty when none) |
+
+The visit body carries the columns of section 5.1 plus the derived `completion_pending`. Money fields (`rate`, `amount`) are decimal strings, as in events.
 
 ### 6.2 `/complete` algorithm (one transaction, role `visits_app`)
 
@@ -325,6 +336,12 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 - Each module uses its own connection pool and role; migrations run per chain under a dedicated owner role (`MIGRATIONS_DATABASE_URL`); application roles get only DML grants (D29).
 - No cross-schema foreign keys; `billing_record.visit_id` is a plain UUID from the event.
 
+### 9.1 Roles and migration run (approved by Sasha on 2026-11-11)
+
+- Cluster bootstrap (`docker/postgres/init.sql`, run once by the superuser) creates the login roles `jiris_migrator` (migration owner, `CONNECT, CREATE` on the database), `visits_app` and `billing_app` (`CONNECT` only), and revokes `public` from `PUBLIC`.
+- The Alembic chains run under `jiris_migrator` (`MIGRATIONS_DATABASE_URL`); they create the schemas and tables, own them, and grant DML to the application roles.
+- In docker-compose, migrations run in a dedicated one-shot service `migrate` (`alembic -n visits upgrade head`, then `alembic -n billing upgrade head`). `api` and `worker` depend on it with `condition: service_completed_successfully`; the API process never runs migrations.
+
 ## 10. Configuration
 
 | Setting | Value | Ref |
@@ -334,9 +351,9 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 | Relay backoff ceiling | 30 s | D25 |
 | Outbox retention | 7 days | D25 |
 | Billing transient retry limit | 5 | D15 |
-| Database URLs | one per role: `VISITS_DATABASE_URL`, `BILLING_DATABASE_URL` | decided (D29) |
+| Database URLs | one per role: `VISITS_DATABASE_URL`, `BILLING_DATABASE_URL`; SQLAlchemy form `postgresql+asyncpg://user:password@host:port/db` | decided (D29; URL form approved 2026-11-11) |
 | Broker URL | `RABBITMQ_URL` | decided (D29) |
-| Migration owner URL | `MIGRATIONS_DATABASE_URL` | decided (D29) |
+| Migration owner URL | `MIGRATIONS_DATABASE_URL`, role `jiris_migrator`, same URL form | decided (D29; role name approved 2026-11-11) |
 
 ## 11. Testing (D21)
 
@@ -352,6 +369,8 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 | T8 | Amount and validation | Decimal HALF_UP; 422 on invalid input | Unit tests |
 
 Integration tests wait for eventual completion by polling `GET /api/visits/{id}` with a 10 s timeout (D28).
+
+The integration harness runs the worker as a separate process (`python -m app.main_worker`) and treats it as ready once both `billing.inbox` and `visits.inbox` have at least one consumer (approved by Sasha on 2026-11-11). The API runs in process through `httpx.ASGITransport`.
 
 ## 12. Traceability
 
