@@ -222,15 +222,18 @@ async def test_unroutable_message_keeps_the_row_selectable(
     ],
 )
 async def test_unknown_event_type_is_counted_and_then_excluded(
-    request: pytest.FixtureRequest,
+    visits_db: asyncpg.Connection,
+    billing_db: asyncpg.Connection,
+    visits_engine,
+    billing_engine,
     events_broker,
     stack: Stack,
     caplog: pytest.LogCaptureFixture,
     schema: str,
     unknown_type: str,
 ) -> None:
-    conn: asyncpg.Connection = request.getfixturevalue(f"{schema}_db")
-    engine = request.getfixturevalue(f"{schema}_engine")
+    conn = visits_db if schema == "visits" else billing_db
+    engine = visits_engine if schema == "visits" else billing_engine
     relay = OutboxRelay(schema=schema, engine=engine, broker=events_broker)
     await flush_outbox(relay)
     bad = await insert_outbox_rows(conn, schema, 1, event_type=unknown_type)
