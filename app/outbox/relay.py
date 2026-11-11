@@ -24,7 +24,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from aiormq.exceptions import PublishError
+from aio_pika.exceptions import PublishError
 from faststream.rabbit import RabbitBroker
 from pamqp.commands import Basic
 from sqlalchemy import bindparam, text
