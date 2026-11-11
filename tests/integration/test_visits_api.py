@@ -38,12 +38,12 @@ async def _outbox_rows(visits_db: asyncpg.Connection, visit_id: str) -> list[asy
     )
 
 
-async def _unpublished_count(visits_db: asyncpg.Connection, visit_id: str) -> int:
-    """Module-03 criterion, for the visit under test (DL-15)."""
+async def _outbox_count(visits_db: asyncpg.Connection, visit_id: str) -> int:
+    """Module-03 criterion, for the visit under test (DL-15). From M04 a running relay may
+    publish the row at any moment, so the row is counted whether published or not (DL-22).
+    """
     return await visits_db.fetchval(
-        "SELECT count(*) FROM visits.outbox"
-        " WHERE published_at IS NULL AND payload->>'visit_id' = $1",
-        visit_id,
+        "SELECT count(*) FROM visits.outbox WHERE payload->>'visit_id' = $1", visit_id
     )
 
 
@@ -154,12 +154,11 @@ async def test_complete_accepts_and_writes_one_outbox_event(
     assert body["completion_requested_at"] is not None
     attempt_id = body["completion_attempt_id"]
 
-    assert await _unpublished_count(visits_db, visit["id"]) == 1
+    assert await _outbox_count(visits_db, visit["id"]) == 1
     [row] = await _outbox_rows(visits_db, visit["id"])
     assert str(row["event_id"]) == attempt_id  # R1: attempt id equals the event id
     assert row["event_type"] == "VisitCompleted"
     assert row["schema_version"] == 1
-    assert row["published_at"] is None
     assert row["attempts"] == 0
     assert row["occurred_at"] == datetime.fromisoformat(body["completion_requested_at"])
 
