@@ -220,7 +220,7 @@ The conditional UPDATE is the single point that serialises concurrent requests (
 1. INSERT into `visits.inbox` (`ON CONFLICT DO NOTHING`), then `SELECT processed_at ... FOR UPDATE`; `processed_at` set → already processed → ack.
 2. Load the visit `FOR UPDATE`; absent → park (below); if `completion_attempt_id <> payload.completion_attempt_id` → ignore (R1): `processed_at = now()`, commit, ack.
 3. BillingRecordCreated: already Completed → no-op (R3); else `status = 'Completed'`.
-4. BillingFailed: `completion_requested_at = NULL`, `completion_failure_reason = payload.reason` (D16).
+4. BillingFailed: already Completed → no-op with a WARNING line naming `visit_id` and `completion_attempt_id` (approved by Sasha on 2026-11-11: one reply per attempt makes it impossible by design, and a reset would erase the history D23 keeps); else `completion_requested_at = NULL`, `completion_failure_reason = payload.reason` (D16).
 5. `processed_at = now()`; COMMIT, then ack.
 
 Failure classes of the Visits consumer (approved by Sasha on 2026-11-11, contract DL-30, DL-31), as in the relay:

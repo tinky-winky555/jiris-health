@@ -8,6 +8,7 @@ contract DL-11). `apply_billing_reply` applies a Billing reply (TDD section 6.4,
 contract DL-29 to DL-31).
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -36,6 +37,8 @@ from app.visits.models import (
     Outbox,
     Visit,
 )
+
+logger = logging.getLogger(__name__)
 
 COMPLETABLE = (STATUS_SCHEDULED, STATUS_IN_PROGRESS)  # D10
 CANCELABLE = (STATUS_SCHEDULED, STATUS_IN_PROGRESS)  # TDD section 6 state machine
@@ -227,7 +230,15 @@ async def apply_billing_reply(
     elif visit.status == STATUS_COMPLETED:
         # R3 for a second BillingRecordCreated. A BillingFailed for a Completed visit cannot
         # happen by design (one reply per attempt); resetting it would erase the history D23
-        # keeps, so it is a no-op as well (reported for approval at M06 IG-7).
+        # keeps, so it is a no-op with a WARNING (approved by Sasha, TDD section 6.4).
+        if isinstance(payload, BillingFailed):
+            logger.warning(
+                "BillingFailed ignored for a Completed visit visit_id=%s completion_attempt_id=%s"
+                " event_id=%s",
+                payload.visit_id,
+                payload.completion_attempt_id,
+                envelope.event_id,
+            )
         kind = "noop"
     elif isinstance(payload, BillingRecordCreated):
         visit.status = STATUS_COMPLETED
