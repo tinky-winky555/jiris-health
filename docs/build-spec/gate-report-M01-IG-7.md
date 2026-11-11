@@ -65,11 +65,11 @@ xfailed.
 
 | Risk or follow-up | Impact | Handling |
 |---|---|---|
-| Compiled wheels not verified on manylinux x86_64 | A build on an x86_64 host could fail on a missing cp315 wheel | Verify when an x86_64 host or CI is available; no host in this delivery |
+| Compiled wheels not verified on manylinux x86_64 | A build on an x86_64 host could fail on a missing cp315 wheel | TD-3, close in M08 (`docker build --platform linux/amd64`) |
 | Local credentials written in compose, init.sql and fixtures | Not suitable outside local run and tests | TD-1, close in M08 |
 | `.gitignore` carries unrelated entries; `/scripts` would hide a future scripts folder | A new file could be silently left out of a commit | TD-2, close in M08 |
 | T1 xfails at fixture setup, not at an assertion | Until M06, any other setup failure of the worker fixture is also reported as xfailed; `strict=True` only catches an unexpected pass | Accepted until M06 (DL-6); M06 removes the marker |
 | README does not yet name the `migrate` service | Run instructions incomplete | M08 |
 
 Registers: TD-1 and TD-2 opened in `docs/technical-debt.md` and mirrored
-in contract section 7b. No backlog entry.
+in contract section 7b; TD-3 added at HG-1 on module-03. No backlog entry.
