@@ -1,0 +1,27 @@
+[importlinter]
+root_package = app
+
+[importlinter:contract:modules-independent]
+name = Visits and Billing never import each other
+type = independence
+modules =
+    app.visits
+    app.billing
+
+[importlinter:contract:contracts-standalone]
+name = app.contracts imports neither module
+type = forbidden
+source_modules =
+    app.contracts
+forbidden_modules =
+    app.visits
+    app.billing
+
+[importlinter:contract:outbox-generic]
+name = app.outbox imports neither module
+type = forbidden
+source_modules =
+    app.outbox
+forbidden_modules =
+    app.visits
+    app.billing

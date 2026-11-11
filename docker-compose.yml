@@ -1,0 +1,82 @@
+# Local run (TDD sections 3 and 9.1). Every credential comes from .env (copy .env.example and
+# fill every value); the file holds no default, so a missing value stops compose (TD-1, DL-38).
+
+x-visits-url: &visits-url postgresql+asyncpg://visits_app:${VISITS_APP_PASSWORD:?set VISITS_APP_PASSWORD in .env}@postgres:5432/jiris
+x-billing-url: &billing-url postgresql+asyncpg://billing_app:${BILLING_APP_PASSWORD:?set BILLING_APP_PASSWORD in .env}@postgres:5432/jiris
+
+services:
+  postgres:
+    image: postgres:18.1-alpine
+    environment:
+      POSTGRES_DB: jiris
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      JIRIS_MIGRATOR_PASSWORD: ${JIRIS_MIGRATOR_PASSWORD:?set JIRIS_MIGRATOR_PASSWORD in .env}
+      VISITS_APP_PASSWORD: ${VISITS_APP_PASSWORD:?set VISITS_APP_PASSWORD in .env}
+      BILLING_APP_PASSWORD: ${BILLING_APP_PASSWORD:?set BILLING_APP_PASSWORD in .env}
+    volumes:
+      # init.sh renders the init.sql template with the passwords above (TDD section 9.1).
+      - ./docker/postgres/init.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+      - ./docker/postgres/init.sql:/jiris/init.sql:ro
+      - pgdata:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jiris"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4.2-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    build: .
+    command: ["sh", "-c", "alembic -n visits upgrade head && alembic -n billing upgrade head"]
+    environment:
+      MIGRATIONS_DATABASE_URL: postgresql+asyncpg://jiris_migrator:${JIRIS_MIGRATOR_PASSWORD:?set JIRIS_MIGRATOR_PASSWORD in .env}@postgres:5432/jiris
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: ["uvicorn", "--factory", "app.main_api:create_app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      VISITS_DATABASE_URL: *visits-url
+      BILLING_DATABASE_URL: *billing-url
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.main_worker"]
+    environment:
+      VISITS_DATABASE_URL: *visits-url
+      BILLING_DATABASE_URL: *billing-url
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?set RABBITMQ_USER in .env}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}@rabbitmq:5672/
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  pgdata:

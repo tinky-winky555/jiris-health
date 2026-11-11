@@ -69,7 +69,7 @@ flowchart TB
 | Tests | pytest, httpx AsyncClient, testcontainers (PostgreSQL, RabbitMQ) | decided (D21) |
 | Data access | SQLAlchemy 2 async + asyncpg | decided (D28) |
 | Python version | 3.15.2 or later | decided (D28). Risk: 3.15 shipped in October 2026; check that asyncpg, pydantic-core and other compiled dependencies publish 3.15 wheels before pinning |
-| Local run | docker-compose: postgres, rabbitmq, api, worker | decided (D28) |
+| Local run | docker-compose: postgres, rabbitmq, api, worker, plus a one-shot `migrate` service (section 9.1) | decided (D28; `migrate` approved by Sasha on 2026-11-11) |
 
 ## 4. Repository layout (D28)
 
@@ -83,12 +83,15 @@ app/
     consumer.py         # handles billing.* events
     migrations/         # Alembic chain for schema "visits"
   billing/
+    api.py              # FastAPI router for GET /api/billing-records (contract DL-24)
     service.py          # amount calculation, record creation, error classification
     models.py           # schema "billing"
     consumer.py         # handles visits.* events
     migrations/         # Alembic chain for schema "billing"
   outbox/
     relay.py            # generic polling relay, parametrised by schema and role
+    topology.py         # exchanges, queues, bindings (contract DL-21)
+    consumer.py         # consumer mechanics shared by both modules (contract DL-33)
   main_api.py           # API entry point
   main_worker.py        # worker entry point: 2 relays + 2 consumers + outbox purge
 tests/
@@ -119,7 +122,10 @@ import-linter contracts: `app.visits` and `app.billing` are independent; `app.co
 | | `published_at` | timestamptz null | partial index `WHERE published_at IS NULL` |
 | | `attempts` | int | publish attempts, diagnostic only |
 | `inbox` | `event_id` | uuid PK | de-duplication of Billing replies |
-| | `event_type`, `processed_at` | | |
+| | `event_type` | text | |
+| | `processed_at` | timestamptz null | set when the reply is applied or ignored; NULL while it is failing (contract DL-31, migration `visits_0002`) |
+| | `attempts` | int, default 0 | failed processing attempts of other causes; survives restarts (DL-31) |
+| | `last_error` | text null | last failure (DL-31) |
 
 ### 5.2 Schema `billing` (role `billing_app`)
 
@@ -153,7 +159,7 @@ stateDiagram-v2
   InProgress --> Pending: /complete (status unchanged)
   Pending --> Completed: BillingRecordCreated
   Pending --> SourceStatus: BillingFailed (reset)
-  note right of Pending: not a stored status; completion_requested_at set.\nCancel and Missed rejected with 409 (R2)
+  note right of Pending: not a stored status; completion_requested_at set.\nStart, Cancel and Missed rejected with 409 (R2, DL-11)
 ```
 
 ### 6.1 Endpoints
@@ -161,12 +167,23 @@ stateDiagram-v2
 | Method and path | Purpose | State |
 |---|---|---|
 | `POST /api/visits/{id}/complete` | Request completion | decided (brief, D4) |
-| `POST /api/visits` | Create a visit (validation per FR11, 422 on error) | decided (D28) |
+| `POST /api/visits` | Create a visit (validation per FR11, 422 on error; also 422 for a `rate` with more than 2 decimal places or beyond numeric(12,2), for timestamps without a time zone, and for unknown fields) | decided (D28; extra rules approved by Sasha on 2026-11-11, contract DL-12 and DL-13) |
 | `GET /api/visits/{id}` | Read a visit with `completion_pending` | decided (D28) |
-| `POST /api/visits/{id}/start` | Scheduled → In Progress | decided (D28) |
+| `POST /api/visits/{id}/start` | Scheduled → In Progress; 409 while pending | decided (D28; 409 while pending approved by Sasha on 2026-11-11, contract DL-11) |
 | `POST /api/visits/{id}/cancel` | → Canceled; 409 while pending | decided (D28) |
 | `POST /api/visits/{id}/missed` | Scheduled → Missed; 409 while pending | decided (D28) |
 | `GET /api/billing-records?visit_id=` | Read billing records (for tests and clients) | decided (D28) |
+
+Success responses of the supporting endpoints (approved by Sasha on 2026-11-11):
+
+| Endpoint | Code | Body |
+|---|---|---|
+| `POST /api/visits` | 201 | the created visit |
+| `GET /api/visits/{id}` | 200 | the visit |
+| `POST /api/visits/{id}/start`, `/cancel`, `/missed` | 200 | the visit after the transition |
+| `GET /api/billing-records?visit_id=` | 200 | JSON array of billing records (empty when none) |
+
+The visit body carries the columns of section 5.1 plus the derived `completion_pending`. Money fields (`rate`, `amount`) are decimal strings, as in events.
 
 ### 6.2 `/complete` algorithm (one transaction, role `visits_app`)
 
@@ -195,16 +212,25 @@ The conditional UPDATE is the single point that serialises concurrent requests (
 | Accepted | 202 | visit with `completion_pending: true` |
 | Pending or lost race | 409 | `{"reason": "completion_pending"}` |
 | Completed, Canceled or Missed | 409 | `{"reason": "invalid_status"}` |
-| Not found | 404 | |
+| Not found | 404 | `{"detail": "Not Found"}`, the FastAPI default (approved by Sasha on 2026-11-11, contract DL-10) |
 | Invalid creation payload | 422 | FastAPI validation body |
 
 ### 6.4 Reply handling in Visits (consumer, one transaction)
 
-1. INSERT into `visits.inbox` (`ON CONFLICT DO NOTHING`); no row inserted → already processed → ack.
-2. Load the visit `FOR UPDATE`; if `completion_attempt_id <> payload.completion_attempt_id` → ignore (R1), commit, ack.
+1. INSERT into `visits.inbox` (`ON CONFLICT DO NOTHING`), then `SELECT processed_at ... FOR UPDATE`; `processed_at` set → already processed → ack.
+2. Load the visit `FOR UPDATE`; absent → park (below); if `completion_attempt_id <> payload.completion_attempt_id` → ignore (R1): `processed_at = now()`, commit, ack.
 3. BillingRecordCreated: already Completed → no-op (R3); else `status = 'Completed'`.
-4. BillingFailed: `completion_requested_at = NULL`, `completion_failure_reason = payload.reason` (D16).
-5. COMMIT, then ack.
+4. BillingFailed: already Completed → no-op with a WARNING line naming `visit_id` and `completion_attempt_id` (approved by Sasha on 2026-11-11: one reply per attempt makes it impossible by design, and a reset would erase the history D23 keeps); else `completion_requested_at = NULL`, `completion_failure_reason = payload.reason` (D16).
+5. `processed_at = now()`; COMMIT, then ack.
+
+Failure classes of the Visits consumer (approved by Sasha on 2026-11-11, contract DL-30, DL-31), as in the relay:
+
+- not a valid BillingRecordCreated or BillingFailed envelope of schema version 1, or a payload that fails its validation: reject without requeue to `visits.parking` at once (R9);
+- a reply whose `visit_id` matches no visit: ROLLBACK, an ERROR line, reject without requeue to `visits.parking`;
+- database unavailable or connection lost (definition in section 8.2, contract DL-39): ROLLBACK, `nack` with requeue after an exponential backoff (0.5 s doubling to 30 s), without a limit; `attempts` unchanged (D6);
+- any other exception: ROLLBACK; in a short transaction `INSERT ... ON CONFLICT (event_id) DO UPDATE SET attempts = attempts + 1, last_error = ...`; below 5 attempts `nack` with requeue after 1 s; at 5, reject without requeue to `visits.parking` with an ERROR line.
+
+Because the failure counter lives in the inbox row, a row may exist before the reply is processed; `processed_at` is therefore the processed marker, NULL until the reply is applied or ignored. The Visits consumer and the Billing consumer share the subscription and settling mechanics in `app/outbox/consumer.py` (contract DL-33).
 
 ## 7. Event contract (D20, D27)
 
@@ -224,19 +250,23 @@ Envelope (R6), defined once in `app.contracts`:
 |---|---|---|
 | VisitCompleted | `visits.visit_completed` | `visit_id`, `completion_attempt_id`, `rate`, `start_date_time`, `end_date_time` |
 | BillingRecordCreated | `billing.record_created` | `visit_id`, `completion_attempt_id`, `billing_record_id`, `amount` |
-| BillingFailed | `billing.failed` | `visit_id`, `completion_attempt_id`, `reason`, `error_class` (`transient_exhausted` or `permanent`) |
+| BillingFailed | `billing.failed` | `visit_id`, `completion_attempt_id`, `reason` (a stable code, below), `error_class` (`transient_exhausted` or `permanent`) |
 
 Money travels as a decimal string (for example `"42.50"`) to avoid float rounding (D28).
+
+BillingFailed `reason` is one of these codes, stored by Visits as `completion_failure_reason` and returned by the API (TD-7, closed in M08): `invalid_payload` (non-positive duration or rate), `amount_out_of_range` (SQLSTATE 22003), `invalid_data` (other class 22), `constraint_violation` (class 23 except 23505), `transient_errors_exhausted`. The raw exception text is kept in `billing.inbox.last_error` only and never reaches an API client. The model keeps `reason: str`; `schema_version` stays 1.
 
 ### 7.1 RabbitMQ topology
 
 | Object | Type | Bindings and settings |
 |---|---|---|
 | `jiris.events` | topic exchange, durable | |
-| `billing.inbox` | queue, durable | bound to `visits.*`; `x-dead-letter-exchange = jiris.dlx` |
-| `visits.inbox` | queue, durable | bound to `billing.*`; `x-dead-letter-exchange = jiris.dlx` |
-| `jiris.dlx` | exchange, durable | |
-| `billing.parking`, `visits.parking` | queues, durable | bound to `jiris.dlx` |
+| `billing.inbox` | queue, durable | bound to `visits.*`; `x-dead-letter-exchange = jiris.dlx`; `x-dead-letter-routing-key = billing.parking` |
+| `visits.inbox` | queue, durable | bound to `billing.*`; `x-dead-letter-exchange = jiris.dlx`; `x-dead-letter-routing-key = visits.parking` |
+| `jiris.dlx` | direct exchange, durable | |
+| `billing.parking`, `visits.parking` | queues, durable | each bound to `jiris.dlx` with its own name as routing key |
+
+Parking routing approved by Sasha on 2026-11-11 (contract DL-18): a dead-lettered message reaches its module's parking queue by an explicit routing key, whatever its original key; the original key stays in the `x-death` header. The topology is declared by the worker at start (`app/outbox/topology.py`, contract DL-21).
 
 Messages: persistent, `message_id = event_id`, `content_type = application/json`.
 
@@ -263,21 +293,31 @@ Per schema, with its own role and pool:
 loop:
   BEGIN
   rows = SELECT * FROM <schema>.outbox
-         WHERE published_at IS NULL
+         WHERE published_at IS NULL AND attempts < 5
          ORDER BY occurred_at
          LIMIT 100
          FOR UPDATE SKIP LOCKED
   for row in rows:
-      publish(row) and await publisher confirm
+      if row.event_type has no routing key in app.contracts:
+          remember row.event_id as unknown; continue
+      publish(row), mandatory, and await publisher confirm (with a timeout)
       UPDATE outbox SET published_at = now() WHERE event_id = row.event_id
   COMMIT
   sleep 500 ms if rows was empty
-on broker error: ROLLBACK, exponential backoff up to 30 s, retry forever
+on broker unavailable, connection lost, negative confirm or publish timeout:
+  ROLLBACK, exponential backoff up to 30 s, retry forever; attempts unchanged
+on message returned as unroutable:
+  the same as above, plus an ERROR log line; the row is not excluded
+after the pass, whether it committed or rolled back, in a short transaction:
+  UPDATE outbox SET attempts = attempts + 1 WHERE event_id IN (unknown rows)
+  an ERROR log line per unknown row; at attempts = 5 the row leaves the selection
 ```
+
+Error classes of the relay approved by Sasha on 2026-11-11 (contract DL-19, DL-20): only an event type the relay cannot route counts towards `attempts`, so a long broker outage never excludes an event (D6); an unknown type cannot block later events beyond five passes. Excluded rows stay in the table, unpublished, for an operator to inspect.
 
 - Several relay instances are safe (`SKIP LOCKED`).
 - Crash after confirm and before COMMIT → the row is published again; receivers de-duplicate.
-- Purge job in the worker: `DELETE FROM <schema>.outbox WHERE published_at < now() - interval '7 days'` (R5, D25).
+- Purge job in the worker (`app/outbox/purge.py`, M08): for each schema as its own role, at start and then every hour, `DELETE FROM <schema>.outbox WHERE event_id IN (SELECT event_id ... WHERE published_at IS NOT NULL AND published_at < now() - interval '7 days' LIMIT 1000 FOR UPDATE SKIP LOCKED)`, batch after batch; unpublished rows are never deleted, whatever their age (R5, D25). One log line per pass with the number of rows deleted.
 
 ### 8.2 Billing consumer (D15, R8, R9)
 
@@ -286,25 +326,37 @@ on message:
   parse envelope; parse error → reject without requeue → parking (R9)
   BEGIN
   inbox row: INSERT ... ON CONFLICT (event_id) DO NOTHING, then SELECT ... FOR UPDATE
-  if status = processed → COMMIT, ack
+  if status <> processing (processed or failed) → COMMIT, ack
   try:
+      validate: end_date_time > start_date_time and rate > 0, else PermanentError
       amount = round_half_up(rate × hours(end − start), 2)
       INSERT billing_record (status = 'Created')
-        on unique violation → load the existing active record (R8)
+        ON CONFLICT (visit_id) WHERE status = 'Created' DO NOTHING → load the existing active record (R8)
       INSERT outbox BillingRecordCreated
       inbox.status = processed
       COMMIT, ack
-  except PermanentError as e:
+  except database unavailable or connection lost:
+      ROLLBACK; nack with requeue after a backoff of 0.5 s doubling to 30 s; no limit; not counted (D6)
+  except permanent error as e:
       ROLLBACK; in a new transaction: inbox.status = failed, last_error = e,
       INSERT outbox BillingFailed(error_class = permanent); COMMIT; ack
   except Exception as e:            # transient or unclassified
       ROLLBACK; in a new transaction: inbox.attempts += 1, last_error = e; COMMIT
-      if attempts < 5: nack with requeue (after a short delay, D28)
+      if attempts < 5: nack with requeue (after 1 s, D28)
       else: inbox.status = failed, INSERT outbox BillingFailed(error_class = transient_exhausted),
             COMMIT, reject without requeue → parking
+  a failure of the new transaction itself is classified again
 ```
 
-Error classes: transient = database connectivity, timeouts, broker errors; permanent = validation of the payload (for example non-positive duration). Anything else counts as transient (D15).
+Error classes (D15, refined by Sasha on 2026-11-11, contract DL-35 and DL-36):
+
+- database unavailable or connection lost (as the relay and the Visits consumer, `is_database_unavailable` in `app/outbox/consumer.py`): retried with backoff without a limit and never counted, because the counter and BillingFailed are themselves database writes (D6). Narrowed in M08 (TD-6, contract DL-39, DL-42): connection errors (OS errors, timeouts, asyncpg connection errors) and the SQLSTATEs 08 (class, connection exception), 57P (57P01 to 57P03, operator intervention), 40001 (serialisation failure), 40P01 (deadlock) and 53300 (too many connections); a SQLAlchemy operational or interface error without any SQLSTATE; any other SQLSTATE is not an outage. Accepted risk: a deterministic deadlock caused by a bug repeats for ever and shows only as WARNING lines with `cause=database_unavailable`;
+- permanent: validation of the payload (non-positive duration or rate, `PermanentError`), and database errors of SQLSTATE class 22 (data exception, for example `22003` when the amount exceeds `numeric(12,2)`) and class 23 (integrity constraint violation), except `23505` `unique_violation`, which stays transient so that a concurrent duplicate delivery is resolved on retry through the inbox and never emits BillingFailed;
+- transient: everything else, including a `RAISE EXCEPTION` (`P0001`) and an `OperationalError` with a SQLSTATE outside the definition above; retried up to 5 times, counted in `billing.inbox`; unclassified errors count as transient. (Until M08, 40001 and 40P01 were transient here; DL-39 moved them to the first class.)
+
+A permanent failure is acknowledged, not parked; its cause stays in `billing.inbox.last_error` and in the visit's `completion_failure_reason`. A message whose inbox row is `failed` is a duplicate on any later delivery, so BillingFailed is written once.
+
+The consumer settles every message itself (FastStream `AckPolicy.MANUAL`): the library default, reject on error, would park a VisitCompleted on any exception. The subscriber also hands the body over undecoded (a raw decoder): FastStream's JSON decoder would fail on a malformed body before the handler runs, and under manual acknowledgement that message would stay unsettled. The partial unique index is matched with the literal predicate `status = 'Created'` in `ON CONFLICT ... WHERE`, because a bound parameter cannot be matched once PostgreSQL uses a generic plan for the prepared statement. The interim rule of M05 (DL-25 b: every other exception requeued after 1 s without a counter) was replaced by the paths above in M07.
 
 ### 8.3 Connection loss
 
@@ -312,18 +364,35 @@ Relays and consumers reconnect automatically with exponential backoff (R7); prov
 
 ## 9. Module isolation (D5, D13)
 
+As built (amended under contract DL-1, approved by Sasha on 2026-11-11; detail in section 9.1):
+
 ```sql
-CREATE SCHEMA visits; CREATE SCHEMA billing;
-CREATE ROLE visits_app LOGIN; CREATE ROLE billing_app LOGIN;
-GRANT USAGE ON SCHEMA visits TO visits_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA visits TO visits_app;
-GRANT USAGE ON SCHEMA billing TO billing_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA billing TO billing_app;
+-- Cluster bootstrap: docker/postgres/init.sql, run once by the superuser
+CREATE ROLE jiris_migrator LOGIN; CREATE ROLE visits_app LOGIN; CREATE ROLE billing_app LOGIN;
+GRANT CONNECT, CREATE ON DATABASE jiris TO jiris_migrator;
+GRANT CONNECT ON DATABASE jiris TO visits_app, billing_app;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
+
+-- Chain "visits", run by jiris_migrator; chain "billing" is symmetric
+-- (billing_record, outbox, inbox; role billing_app)
+CREATE SCHEMA IF NOT EXISTS visits;   -- in env.py, before Alembic creates visits.alembic_version
+GRANT USAGE ON SCHEMA visits TO visits_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON visits.visit, visits.outbox, visits.inbox TO visits_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA visits
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO visits_app;
 ```
 
 - Each module uses its own connection pool and role; migrations run per chain under a dedicated owner role (`MIGRATIONS_DATABASE_URL`); application roles get only DML grants (D29).
 - No cross-schema foreign keys; `billing_record.visit_id` is a plain UUID from the event.
+
+### 9.1 Roles and migration run (approved by Sasha on 2026-11-11)
+
+- Cluster bootstrap (`docker/postgres/init.sql`, a template whose passwords are psql variables, run once by the superuser through `docker/postgres/init.sh` with the passwords from `.env`; the tests render it with random passwords, TD-1, contract DL-38) creates the login roles `jiris_migrator` (migration owner, `CONNECT, CREATE` on the database), `visits_app` and `billing_app` (`CONNECT` only), and revokes `public` from `PUBLIC`.
+- The Alembic chains run under `jiris_migrator` (`MIGRATIONS_DATABASE_URL`); they create the schemas and tables, own them, and grant DML to the application roles.
+- Each chain keeps its version table in its own schema (`visits.alembic_version`, `billing.alembic_version`); the chain's `env.py` runs `CREATE SCHEMA IF NOT EXISTS` before Alembic starts, because the version table needs the schema.
+- DML is granted on the module's named tables, not `ON ALL TABLES`, so the application role cannot touch `alembic_version`; `ALTER DEFAULT PRIVILEGES IN SCHEMA` gives the same DML on tables created by later migrations. T7 permanently checks that neither application role can SELECT, INSERT, UPDATE or DELETE on its `alembic_version`.
+- `alembic -n <chain> check` runs in the test suite and fails when the SQLAlchemy models and the migrations drift apart.
+- In docker-compose, migrations run in a dedicated one-shot service `migrate` (`alembic -n visits upgrade head`, then `alembic -n billing upgrade head`). `api` and `worker` depend on it with `condition: service_completed_successfully`; the API process never runs migrations.
 
 ## 10. Configuration
 
@@ -333,10 +402,11 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 | Relay batch size | 100 | D25 |
 | Relay backoff ceiling | 30 s | D25 |
 | Outbox retention | 7 days | D25 |
+| Outbox purge interval and batch | 1 hour, 1000 rows per batch | M08 |
 | Billing transient retry limit | 5 | D15 |
-| Database URLs | one per role: `VISITS_DATABASE_URL`, `BILLING_DATABASE_URL` | decided (D29) |
+| Database URLs | one per role: `VISITS_DATABASE_URL`, `BILLING_DATABASE_URL`; SQLAlchemy form `postgresql+asyncpg://user:password@host:port/db` | decided (D29; URL form approved 2026-11-11) |
 | Broker URL | `RABBITMQ_URL` | decided (D29) |
-| Migration owner URL | `MIGRATIONS_DATABASE_URL` | decided (D29) |
+| Migration owner URL | `MIGRATIONS_DATABASE_URL`, role `jiris_migrator`, same URL form | decided (D29; role name approved 2026-11-11) |
 
 ## 11. Testing (D21)
 
@@ -352,6 +422,8 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 | T8 | Amount and validation | Decimal HALF_UP; 422 on invalid input | Unit tests |
 
 Integration tests wait for eventual completion by polling `GET /api/visits/{id}` with a 10 s timeout (D28).
+
+The integration harness runs the worker as a separate process (`python -m app.main_worker`) and treats it as ready once both `billing.inbox` and `visits.inbox` have at least one consumer (approved by Sasha on 2026-11-11). The API runs in process through `httpx.ASGITransport`.
 
 ## 12. Traceability
 
