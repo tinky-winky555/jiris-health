@@ -123,4 +123,14 @@ after `5b91b75`; not collectable in full after `fad1157` to `66d7b6e`
 | `INSERT ... ON CONFLICT ... WHERE` depends on the literal predicate matching `ux_active_record` | Changing the index predicate without the code breaks billing | The literal is built from `RECORD_CREATED`, the same constant as the model's index |
 | R8 replies with the existing record's amount, not the amount of the new attempt | A second attempt with another rate (not possible through the API, since D17 and R1) gets the first amount | As TDD §8.2 and R8 |
 
+Added before the merge at the developer's request (IG-7 approval
+condition): `test_on_conflict_survives_the_generic_plan[auto]` and
+`[force_generic_plan]`, 12 attempts for one visit on one connection
+(`pg_backend_pid()` checked after each), every attempt after the first
+conflicting on `ux_active_record`: no exception, one active record, 12
+replies. Shown on a scratch copy with the bound predicate restored: both
+cases fail with `there is no unique or exclusion constraint matching the
+ON CONFLICT specification`. The code comment next to the literal predicate
+names the cause and TDD §8.2.
+
 Registers: no new technical debt or backlog entry.

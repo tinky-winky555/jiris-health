@@ -155,3 +155,39 @@ async def test_r8_second_attempt_replies_with_the_existing_record(
         second.payload.completion_attempt_id,
     }
     assert {r.amount for r in replies} == {record["amount"]}  # the existing record's amount
+
+
+# Regression: ON CONFLICT on the partial index under a generic plan (TDD section 8.2)
+
+
+@pytest.mark.parametrize("plan_cache_mode", ["auto", "force_generic_plan"])
+async def test_on_conflict_survives_the_generic_plan(
+    billing_engine, billing_db: asyncpg.Connection, plan_cache_mode: str
+) -> None:
+    """12 attempts for one visit on one connection, so asyncpg reuses its prepared statements
+    and PostgreSQL moves them to a generic plan (after five executions under `auto`, at once
+    under `force_generic_plan`). Every attempt after the first conflicts on ux_active_record;
+    none may raise, and one active record remains."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    visit_id = uuid.uuid7()
+    attempts = 12
+    async with billing_engine.connect() as conn:
+        await conn.execute(text(f"SET plan_cache_mode = {plan_cache_mode}"))
+        await conn.commit()
+        backend = await conn.scalar(text("SELECT pg_backend_pid()"))
+        outcomes = []
+        for _ in range(attempts):
+            async with AsyncSession(bind=conn, expire_on_commit=False) as session:
+                async with session.begin():
+                    outcomes.append(await process_visit_completed(session, _visit_completed(visit_id)))
+            assert await conn.scalar(text("SELECT pg_backend_pid()")) == backend  # one connection
+            await conn.commit()
+
+    assert [o.duplicate for o in outcomes] == [False] * attempts
+    [record] = await billing_db.fetch(
+        "SELECT * FROM billing.billing_record WHERE visit_id = $1 AND status = 'Created'", visit_id
+    )
+    assert {o.billing_record_id for o in outcomes} == {record["id"]}
+    assert len(await _replies(billing_db, visit_id)) == attempts

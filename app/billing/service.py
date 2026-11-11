@@ -80,9 +80,13 @@ async def process_visit_completed(
             .values(id=uuid.uuid7(), visit_id=payload.visit_id, amount=amount, status=RECORD_CREATED)
             .on_conflict_do_nothing(
                 index_elements=[BillingRecord.visit_id],
-                # A literal, as in ux_active_record: with a bound parameter PostgreSQL cannot
-                # match the partial index once it switches the prepared statement to a
-                # generic plan, and the INSERT fails.
+                # A literal, exactly as in ux_active_record, never a bound parameter: asyncpg
+                # prepares the statement, and once PostgreSQL switches it to a generic plan
+                # (after five executions, or at once under plan_cache_mode =
+                # force_generic_plan) a parameter cannot prove the partial index predicate, so
+                # the INSERT fails with "no unique or exclusion constraint matching the ON
+                # CONFLICT specification". See TDD section 8.2; regression test
+                # test_on_conflict_survives_the_generic_plan.
                 index_where=ACTIVE_RECORD_PREDICATE,
             )
             .returning(BillingRecord.id)
