@@ -324,27 +324,37 @@ on message:
   parse envelope; parse error → reject without requeue → parking (R9)
   BEGIN
   inbox row: INSERT ... ON CONFLICT (event_id) DO NOTHING, then SELECT ... FOR UPDATE
-  if status = processed → COMMIT, ack
+  if status <> processing (processed or failed) → COMMIT, ack
   try:
+      validate: end_date_time > start_date_time and rate > 0, else PermanentError
       amount = round_half_up(rate × hours(end − start), 2)
       INSERT billing_record (status = 'Created')
-        on unique violation → load the existing active record (R8)
+        ON CONFLICT (visit_id) WHERE status = 'Created' DO NOTHING → load the existing active record (R8)
       INSERT outbox BillingRecordCreated
       inbox.status = processed
       COMMIT, ack
-  except PermanentError as e:
+  except database unavailable or connection lost:
+      ROLLBACK; nack with requeue after a backoff of 0.5 s doubling to 30 s; no limit; not counted (D6)
+  except permanent error as e:
       ROLLBACK; in a new transaction: inbox.status = failed, last_error = e,
       INSERT outbox BillingFailed(error_class = permanent); COMMIT; ack
   except Exception as e:            # transient or unclassified
       ROLLBACK; in a new transaction: inbox.attempts += 1, last_error = e; COMMIT
-      if attempts < 5: nack with requeue (after a short delay, D28)
+      if attempts < 5: nack with requeue (after 1 s, D28)
       else: inbox.status = failed, INSERT outbox BillingFailed(error_class = transient_exhausted),
             COMMIT, reject without requeue → parking
+  a failure of the new transaction itself is classified again
 ```
 
-Error classes: transient = database connectivity, timeouts, broker errors; permanent = validation of the payload (for example non-positive duration). Anything else counts as transient (D15).
+Error classes (D15, refined by Sasha on 2026-11-11, contract DL-35 and DL-36):
 
-Interim behaviour of M05 until M07 (approved by Sasha on 2026-11-11, contract DL-25): parsing covers the envelope, its `event_type` (VisitCompleted) and `schema_version` (1), and the validation of the payload; any failure there is rejected without requeue to `billing.parking` at once (R9). Any other exception means ROLLBACK, an ERROR line and `nack` with requeue after 1 s, with no counter; M07 replaces this with the counted transient path, the permanent path and BillingFailed above. The consumer settles every message itself (FastStream `AckPolicy.MANUAL`): the library default, reject on error, would park a VisitCompleted on any exception. The subscriber also hands the body over undecoded (a raw decoder): FastStream's JSON decoder would fail on a malformed body before the handler runs, and under manual acknowledgement that message would stay unsettled. The partial unique index is matched with the literal predicate `status = 'Created'` in `ON CONFLICT ... WHERE`, because a bound parameter cannot be matched once PostgreSQL uses a generic plan for the prepared statement.
+- database unavailable or connection lost (as the relay and the Visits consumer, `is_database_unavailable`, TD-6): retried with backoff without a limit and never counted, because the counter and BillingFailed are themselves database writes (D6);
+- permanent: validation of the payload (non-positive duration or rate, `PermanentError`), and database errors of SQLSTATE class 22 (data exception, for example `22003` when the amount exceeds `numeric(12,2)`) and class 23 (integrity constraint violation), except `23505` `unique_violation`, which stays transient so that a concurrent duplicate delivery is resolved on retry through the inbox and never emits BillingFailed;
+- transient: everything else, including a `RAISE EXCEPTION` (`P0001`), a serialisation failure (`40001`) and a deadlock (`40P01`); retried up to 5 times, counted in `billing.inbox`; unclassified errors count as transient.
+
+A permanent failure is acknowledged, not parked; its cause stays in `billing.inbox.last_error` and in the visit's `completion_failure_reason`. A message whose inbox row is `failed` is a duplicate on any later delivery, so BillingFailed is written once.
+
+The consumer settles every message itself (FastStream `AckPolicy.MANUAL`): the library default, reject on error, would park a VisitCompleted on any exception. The subscriber also hands the body over undecoded (a raw decoder): FastStream's JSON decoder would fail on a malformed body before the handler runs, and under manual acknowledgement that message would stay unsettled. The partial unique index is matched with the literal predicate `status = 'Created'` in `ON CONFLICT ... WHERE`, because a bound parameter cannot be matched once PostgreSQL uses a generic plan for the prepared statement. The interim rule of M05 (DL-25 b: every other exception requeued after 1 s without a counter) was replaced by the paths above in M07.
 
 ### 8.3 Connection loss
 

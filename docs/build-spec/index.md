@@ -29,13 +29,13 @@ live in `contract.md`, not here. Input path B: `docs/PRD.md` and
 | M01 | Repository foundation (built before the contract) | module-01-repository-foundation.md | 6 |
 | M02 | Schemas, roles, migrations (built before the contract) | module-02-schemas-roles-migrations.md | 8 |
 | M03 | Visits API, completion endpoint and outbox write | module-03-visits-api-and-outbox.md | 10 |
-| M04 | Outbox relay and broker topology | module-04-outbox-relay.md (to be authored) | 8 |
-| M05 | Billing consumer, happy path | module-05-billing-consumer.md (to be authored) | 10 |
-| M06 | Visits consumer; T1 green | module-06-visits-consumer.md (to be authored) | 8 |
-| M07 | Failure paths: errors, retries, parking | module-07-failure-paths.md (to be authored) | 10 |
+| M04 | Outbox relay and broker topology | module-04-outbox-relay.md | 8 |
+| M05 | Billing consumer, happy path | module-05-billing-consumer.md | 10 |
+| M06 | Visits consumer; T1 green | module-06-visits-consumer.md | 8 |
+| M07 | Failure paths in Billing: error classes, counted retries, BillingFailed, parking; T4, T5 | module-07-failure-paths.md | 8 |
 | M08 | Operations and delivery: purge, reconnection, README, release | module-08-operations-delivery.md (to be authored) | 6 |
 
-Total: 66 hours. Module documents M04 to M08 are authored by the agent
+Total: 64 hours (M07 reduced from 10 to 8 hours: the Visits side of BillingFailed moved to M06, DL-29). Module documents M04 to M08 are authored by the agent
 one at a time, after the previous module's IG-7 is approved.
 
 ## c. Dependency graph
