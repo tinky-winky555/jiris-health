@@ -121,10 +121,11 @@ retrospectively.
 | M01, repository foundation | Complete. Committed as `6c707c0` on `build/increments` before the contract. Completion report `gate-report-M01-IG-7.md`: 5 of 5 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | M02, schemas, roles, migrations | Complete. Committed as `aed4672` on `build/increments` before the contract; T7 write case added in the adoption commit (DL-9, item 15). Completion report `gate-report-M02-IG-7.md`: 6 of 6 criteria met. IG-7 approved by Sasha on 2026-11-11. |
 | T1 | `xfail(strict=True, raises=WorkerNotReady)`, reason "needs relay and consumers; removed in M06" (DL-6, DL-17). 50 of 50 runs reported xfailed, at setup, with `WorkerNotReady`: the worker is not built. |
-| Test count | 181 collected on `build/increments` at `65bb3f7` (131 passed, 50 xfailed). 187 collected on `feature/m04-outbox-relay` at `14349e4` (137 passed, 50 xfailed), after the rate precision test. This is the baseline for M04. |
+| Test count | 217 collected on `feature/m04-outbox-relay` (167 passed, 50 xfailed), M04 completion. Baseline before M04: 187 (181 on `build/increments` at `65bb3f7`, plus the rate precision test). |
 | M03, Visits API and outbox | Complete. IG-7 approved by Sasha on 2026-11-11; merged into `build/increments` as `65bb3f7` (`Merge M03 visits-api-and-outbox: IG-7 approved`) and pushed. Completion report `gate-report-M03-IG-7.md`: 6 of 6 criteria met. The pre-contract draft is kept in `~/Code/jiris/m03-draft/` (DL-8). |
 | Rate precision (developer request after M03) | `tests/integration/test_rate_precision.py`, committed as `14349e4` on `feature/m04-outbox-relay`: `0.10` and `19.99`, sent as a JSON string or number, are stored, returned and carried in VisitCompleted to the cent; `1.005` is rejected with 422 in both forms (DL-12). No precision loss found; no open question raised. |
-| Current module | M04, outbox relay and broker topology, in progress on `feature/m04-outbox-relay` (from `build/increments` at `65bb3f7`). HG-1 given with the decisions DL-18 to DL-22. |
+| M04, outbox relay and topology | Complete on `feature/m04-outbox-relay` (from `build/increments` at `65bb3f7`; not merged, not pushed). Completion report `gate-report-M04-IG-7.md`: 9 of 9 criteria met. |
+| Current module | None open. M05 (Billing consumer, happy path) is authored after the developer approves the M04 IG-7 report. |
 | Last approved gate | HG-1 on module-04 and `gate-report-M04-IG-3.md`, 2026-11-11; IG-7 of M01 and M02, 2026-11-11. |
 | Next pending gate | Developer review of `gate-report-M04-IG-7.md`, then the BS-3 merge. |
 | Blockers | None. |
@@ -196,3 +197,4 @@ Mirrors open entries in `docs/technical-debt.md`.
 | TD-2 | `.gitignore` built from a Node.js template, with entries unrelated to this repository | Open |
 | TD-3 | Compiled cp315 wheels not verified on manylinux x86_64 | Open |
 | TD-4 | Rejected creation requests (422) leave no command log line | Open |
+| TD-5 | The relay imports aio-pika and pamqp, which reach the lock only through `faststream[rabbit]` | Open |

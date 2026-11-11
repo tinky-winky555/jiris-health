@@ -106,24 +106,26 @@ outbox row exists, without `published_at IS NULL`.
 
 ## 4. Acceptance criteria
 
-- [ ] Every test of task 3.1 passes.
-- [ ] After a `/complete` and one relay pass, the message is in
+- [x] Every test of task 3.1 passes.
+- [x] After a `/complete` and one relay pass, the message is in
   `billing.inbox` with the properties of 3.1.3, the row has
   `published_at` set, and a second pass publishes nothing.
-- [ ] 3.1.6 passes: the event is published after the broker restart with
+- [x] 3.1.6 passes: the event is published after the broker restart with
   no manual step, and the relay task never exited.
-- [ ] 3.1.5 passes: no `event_id` is delivered twice by two concurrent
+- [x] 3.1.5 passes: no `event_id` is delivered twice by two concurrent
   relays.
-- [ ] A message rejected from either inbox reaches its parking queue.
-- [ ] 3.1.7, 3.1.8 and 3.1.10 pass: broker failures and unroutable
+- [x] A message rejected from either inbox reaches its parking queue.
+- [x] 3.1.7, 3.1.8 and 3.1.10 pass: broker failures and unroutable
   messages never change `attempts`; unknown event types are excluded
   after five passes and do not block good events.
-- [ ] `uv run lint-imports` reports 3 contracts kept (`app.outbox` imports
+- [x] `uv run lint-imports` reports 3 contracts kept (`app.outbox` imports
   neither module); `alembic -n visits check` and `alembic -n billing
   check` pass; T7 passes.
-- [ ] T1 remains collected 50 times and reported xfailed with
+- [x] T1 remains collected 50 times and reported xfailed with
   `WorkerNotReady` (DL-17).
-- [ ] Collected test count is at least 187 plus the new tests.
+- [x] Collected test count is at least 187 plus the new tests.
+
+Completion report: `gate-report-M04-IG-7.md`.
 
 ## 5. Out of scope
 

@@ -287,7 +287,7 @@ loop:
       UPDATE outbox SET published_at = now() WHERE event_id = row.event_id
   COMMIT
   sleep 500 ms if rows was empty
-on broker unavailable, connection lost or publish timeout:
+on broker unavailable, connection lost, negative confirm or publish timeout:
   ROLLBACK, exponential backoff up to 30 s, retry forever; attempts unchanged
 on message returned as unroutable:
   the same as above, plus an ERROR log line; the row is not excluded
