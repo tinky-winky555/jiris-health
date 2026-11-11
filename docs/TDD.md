@@ -153,7 +153,7 @@ stateDiagram-v2
   InProgress --> Pending: /complete (status unchanged)
   Pending --> Completed: BillingRecordCreated
   Pending --> SourceStatus: BillingFailed (reset)
-  note right of Pending: not a stored status; completion_requested_at set.\nCancel and Missed rejected with 409 (R2)
+  note right of Pending: not a stored status; completion_requested_at set.\nStart, Cancel and Missed rejected with 409 (R2, DL-11)
 ```
 
 ### 6.1 Endpoints
@@ -161,9 +161,9 @@ stateDiagram-v2
 | Method and path | Purpose | State |
 |---|---|---|
 | `POST /api/visits/{id}/complete` | Request completion | decided (brief, D4) |
-| `POST /api/visits` | Create a visit (validation per FR11, 422 on error) | decided (D28) |
+| `POST /api/visits` | Create a visit (validation per FR11, 422 on error; also 422 for a `rate` with more than 2 decimal places or beyond numeric(12,2), for timestamps without a time zone, and for unknown fields) | decided (D28; extra rules approved by Sasha on 2026-11-11, contract DL-12 and DL-13) |
 | `GET /api/visits/{id}` | Read a visit with `completion_pending` | decided (D28) |
-| `POST /api/visits/{id}/start` | Scheduled → In Progress | decided (D28) |
+| `POST /api/visits/{id}/start` | Scheduled → In Progress; 409 while pending | decided (D28; 409 while pending approved by Sasha on 2026-11-11, contract DL-11) |
 | `POST /api/visits/{id}/cancel` | → Canceled; 409 while pending | decided (D28) |
 | `POST /api/visits/{id}/missed` | Scheduled → Missed; 409 while pending | decided (D28) |
 | `GET /api/billing-records?visit_id=` | Read billing records (for tests and clients) | decided (D28) |
@@ -206,7 +206,7 @@ The conditional UPDATE is the single point that serialises concurrent requests (
 | Accepted | 202 | visit with `completion_pending: true` |
 | Pending or lost race | 409 | `{"reason": "completion_pending"}` |
 | Completed, Canceled or Missed | 409 | `{"reason": "invalid_status"}` |
-| Not found | 404 | |
+| Not found | 404 | `{"detail": "Not Found"}`, the FastAPI default (approved by Sasha on 2026-11-11, contract DL-10) |
 | Invalid creation payload | 422 | FastAPI validation body |
 
 ### 6.4 Reply handling in Visits (consumer, one transaction)

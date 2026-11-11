@@ -65,7 +65,7 @@ section 6.
 
 | Pattern | Rule |
 |---|---|
-| Error shape | 409 body `{"reason": "completion_pending" \| "invalid_status"}`; 404 empty; 422 FastAPI validation body |
+| Error shape | 409 body `{"reason": "completion_pending" \| "invalid_status"}`; 404 body `{"detail": "Not Found"}` (DL-10); 422 FastAPI validation body |
 | Response codes | Create 201 with the visit; `/start`, `/cancel`, `/missed` 200 with the visit; `/complete` 202 with the visit; list endpoints return a JSON array; no pagination |
 | Transactions | One transaction per HTTP command and per consumed message; state change and outbox row in the same transaction |
 | Idempotency | Inbox insert `ON CONFLICT (event_id) DO NOTHING` first; processed → ack without effect; `message_id` = `event_id` |
